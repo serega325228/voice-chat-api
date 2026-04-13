@@ -1,0 +1,4 @@
+.env
+/.qwen
+go.mod
+go.sum

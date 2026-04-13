@@ -1,0 +1,12 @@
+env: "local"
+http_server:
+  address: "localhost:8082"
+  shutdown_timeout: "15s"
+  timeout: "4s"
+  idle_timeout: "60s"
+jwt:
+  access_ttl: "15m"
+  refresh_ttl: "30d"
+postgres:
+  maxx_conns: "15"
+  health_check_period: "60s"
