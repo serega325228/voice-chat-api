@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS tokens
         ON UPDATE NO ACTION
 );
 
+CREATE INDEX IF NOT EXISTS idx_tokens_family_id ON tokens (family_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_token_hash ON tokens (token_hash);
 CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_tokens_family_active
+ON tokens (family_id)
+WHERE status = 'active';
 

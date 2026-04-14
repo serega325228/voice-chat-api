@@ -74,6 +74,42 @@ func (r *TokenRepo) Create(ctx context.Context, userID uuid.UUID, tokenHash [32]
 	return id, nil
 }
 
+func (r *TokenRepo) GetLatestByFamilyID(ctx context.Context, familyID uuid.UUID) (models.RefreshToken, error) {
+	const op = "token.GetByFamilyID"
+	q := r.qp.GetQuerier(ctx)
+	query := `
+		SELECT *
+		FROM tokens
+		WHERE family_id = $1
+		ORDER BY expires_at DESC
+		LIMIT 1;
+	`
+	var token models.RefreshToken
+	err := q.QueryRow(ctx, query, familyID).Scan(&token)
+	if err != nil {
+		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return token, nil
+}
+
+func (r *TokenRepo) ChangeFamilyStatus(ctx context.Context, familyID uuid.UUID, statusBefore, statusAfter models.RefreshTokenStatus) error {
+	const op = "token.ChangeFamilyStatus"
+	q := r.qp.GetQuerier(ctx)
+	query := `
+		UPDATE tokens
+		SET status = $1
+		WHERE family_id = $2
+		AND status = $3
+	`
+	_, err := q.Exec(ctx, query, statusAfter, familyID, statusBefore)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
 func (r *TokenRepo) GetLatestByUserID(ctx context.Context, userID uuid.UUID) (models.RefreshToken, error) {
 	const op = "token.GetByID"
 	q := r.qp.GetQuerier(ctx)
