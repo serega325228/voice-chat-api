@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -27,9 +26,7 @@ func (h *TokenHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenHash := sha256.Sum256([]byte(oldRefresh.Refresh))
-
-	accessToken, refreshToken, err := h.service.Refresh(r.Context(), tokenHash)
+	accessToken, refreshToken, err := h.service.Refresh(r.Context(), oldRefresh.Refresh)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		return

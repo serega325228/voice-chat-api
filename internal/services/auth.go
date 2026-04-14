@@ -234,18 +234,22 @@ func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token model
 	return nil
 }
 
-// check input token status, if rotated (not active) - must rotated all tokens in this family else just create new pair of access and refresh using input family id
-
-func (a *AuthService) Refresh(ctx context.Context, tokenHash [32]byte) (string, string, error) {
+func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string, string, error) {
 	const op = "auth.Refresh"
 
 	log := a.log.With(
 		slog.String("op", op),
 	)
 
+	_, err := jwt.VerifyToken(refreshString, a.tokenSecret)
+	if err != nil {
+		return "", "", fmt.Errorf("%s: %w", op, err)
+	}
+	tokenHash := sha256.Sum256([]byte(refreshString))
+
 	var accessToken, refreshToken string
 
-	err := a.txProvider.WithTx(ctx, func(ctx context.Context) error {
+	err = a.txProvider.WithTx(ctx, func(ctx context.Context) error {
 		latestRefresh, err := a.tokenProvider.GetByHash(ctx, tokenHash)
 		if err != nil {
 			log.Error("failed find latest token by hash", logger.Err(err))
@@ -254,12 +258,12 @@ func (a *AuthService) Refresh(ctx context.Context, tokenHash [32]byte) (string, 
 
 		if latestRefresh.Status == models.Rotated {
 			log.Warn("token already is rotated")
-			if err := a.tokenProvider.ChangeFamilyStatus(ctx, latestRefresh.FamilyID, models.Active, models.Rotated); err != nil {
+			if err = a.tokenProvider.ChangeFamilyStatus(ctx, latestRefresh.FamilyID, models.Active, models.Rotated); err != nil {
 				return fmt.Errorf("%s: %w", op, ErrTokenAlreadyRotated)
 			}
 		}
 
-		if err := a.MarkRefreshTokenAsRotated(ctx, latestRefresh); err != nil {
+		if err = a.MarkRefreshTokenAsRotated(ctx, latestRefresh); err != nil {
 			log.Error("failed mark token as rotated", logger.Err(err))
 			return err
 		}

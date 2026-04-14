@@ -20,7 +20,7 @@ type AuthService interface {
 		email string,
 		password string,
 	) (string, string, error)
-	Refresh(ctx context.Context, refreshTokenHash [32]byte) (string, string, error)
+	Refresh(ctx context.Context, refreshString string) (string, string, error)
 }
 
 type UserHandler struct {
