@@ -11,6 +11,7 @@ type RefreshToken struct {
 	TokenHash [32]byte
 	Status    RefreshTokenStatus
 	UserID    uuid.UUID
+	FamilyID  uuid.UUID
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }

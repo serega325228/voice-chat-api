@@ -40,6 +40,7 @@ type TokenProvider interface {
 	GetByID(ctx context.Context, tokenID uuid.UUID) (models.RefreshToken, error)
 	GetLatestByUserID(ctx context.Context, userID uuid.UUID) (models.RefreshToken, error)
 	ChangeStatus(ctx context.Context, tokenID uuid.UUID, status models.RefreshTokenStatus) error
+	ChangeFamilyStatus(ctx context.Context, familyID uuid.UUID, statusBefore, statusAfter models.RefreshTokenStatus) error
 }
 
 type UserProvider interface {
@@ -116,7 +117,9 @@ func (a *AuthService) Login(
 
 	log.Info("user logged is successfully")
 
-	return a.CreateNewTokens(ctx, user.ID)
+	familyID := uuid.New()
+
+	return a.CreateNewTokens(ctx, familyID, user.ID)
 }
 
 func (a *AuthService) RegisterUser(
@@ -157,10 +160,12 @@ func (a *AuthService) RegisterUser(
 
 	log.Info("new user registered")
 
-	return a.CreateNewTokens(ctx, userID)
+	familyID := uuid.New()
+
+	return a.CreateNewTokens(ctx, familyID, userID)
 }
 
-func (a *AuthService) CreateNewTokens(ctx context.Context, userID uuid.UUID) (string, string, error) {
+func (a *AuthService) CreateNewTokens(ctx context.Context, familyID, userID uuid.UUID) (string, string, error) {
 	const op = "auth.CreateNewTokens"
 
 	log := a.log.With(
@@ -168,8 +173,6 @@ func (a *AuthService) CreateNewTokens(ctx context.Context, userID uuid.UUID) (st
 	)
 
 	log.Info("creating new pair of tokens")
-
-	familyID := uuid.New()
 
 	refreshToken, err := a.CreateRefreshToken(ctx, familyID, userID)
 	if err != nil {
@@ -223,11 +226,6 @@ func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token model
 
 	log.Info("mark refresh token as rotated")
 
-	if token.Status == models.Rotated {
-		log.Warn("token already is rotated")
-		return fmt.Errorf("%s: %w", op, ErrTokenAlreadyRotated)
-	}
-
 	if err := a.tokenProvider.ChangeStatus(ctx, token.ID, models.Rotated); err != nil {
 		log.Error("failed to change token status", logger.Err(err))
 		return fmt.Errorf("%s: %w", op, err)
@@ -251,7 +249,14 @@ func (a *AuthService) Refresh(ctx context.Context, tokenHash [32]byte) (string, 
 		latestRefresh, err := a.tokenProvider.GetByHash(ctx, tokenHash)
 		if err != nil {
 			log.Error("failed find latest token by hash", logger.Err(err))
-			return err
+			return fmt.Errorf("%s: %w", op, err)
+		}
+
+		if latestRefresh.Status == models.Rotated {
+			log.Warn("token already is rotated")
+			if err := a.tokenProvider.ChangeFamilyStatus(ctx, latestRefresh.FamilyID, models.Active, models.Rotated); err != nil {
+				return fmt.Errorf("%s: %w", op, ErrTokenAlreadyRotated)
+			}
 		}
 
 		if err := a.MarkRefreshTokenAsRotated(ctx, latestRefresh); err != nil {
@@ -259,22 +264,8 @@ func (a *AuthService) Refresh(ctx context.Context, tokenHash [32]byte) (string, 
 			return err
 		}
 
-		user, err := a.userProvider.GetByID(ctx, latestRefresh.UserID)
+		accessToken, refreshToken, err = a.CreateNewTokens(ctx, latestRefresh.FamilyID, latestRefresh.UserID)
 		if err != nil {
-			return fmt.Errorf("%s: %w", op, err)
-		}
-
-		_, refreshToken, err = a.CreateRefreshToken(ctx, user.ID)
-		if err != nil {
-			log.Error("failed to create refresh token", logger.Err(err))
-			return fmt.Errorf("%s: %w", op, err)
-		}
-
-		log.Info("refresh token created")
-
-		accessToken, err = jwt.NewAccessToken(latestRefresh.UserID, user.Username, a.accessTTL, a.tokenSecret)
-		if err != nil {
-			log.Error("failed to create access token", logger.Err(err))
 			return fmt.Errorf("%s: %w", op, err)
 		}
 
