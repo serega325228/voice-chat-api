@@ -13,9 +13,10 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
 CREATE TABLE IF NOT EXISTS tokens
 (
     id UUID PRIMARY KEY DEFAULT get_random_uuid(),
+    family_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     token_hash BYTEA NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'active',
-    user_id UUID NOT NULL,
     expires_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_at TIMESTAMP NOT NULL
 

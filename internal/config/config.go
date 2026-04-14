@@ -19,6 +19,7 @@ type Config struct {
 type HTTPServer struct {
 	Address         string        `yaml:"address" env-default:"localhost:8080"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" env-default:"15s"`
+	CloseTimeout    time.Duration `yaml:"close_timeout" env-default:"10s"`
 	Timeout         time.Duration `yaml:"timeout" env-default:"4s"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout" env-default:"60s"`
 }
