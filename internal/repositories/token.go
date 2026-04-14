@@ -56,17 +56,17 @@ func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (models.Refr
 	return token, nil
 }
 
-func (r *TokenRepo) Create(ctx context.Context, userID uuid.UUID, tokenHash [32]byte, status models.RefreshTokenStatus, created_at, expires_at time.Time) (uuid.UUID, error) {
+func (r *TokenRepo) Create(ctx context.Context, familyID, userID uuid.UUID, tokenHash [32]byte, status models.RefreshTokenStatus, created_at, expires_at time.Time) (uuid.UUID, error) {
 	const op = "token.Create"
 	q := r.qp.GetQuerier(ctx)
 	query := `
 		INSERT INTO tokens
-		(user_id, token_hash, status, created_at, expires_at) 
-		VALUES ($1, $2, $3, $4, $5)
+		(family_id, user_id, token_hash, status, created_at, expires_at) 
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
 	`
 	var id uuid.UUID
-	err := q.QueryRow(ctx, query, userID, tokenHash, status, created_at, expires_at).Scan(&id)
+	err := q.QueryRow(ctx, query, familyID, userID, tokenHash, status, created_at, expires_at).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("%s: %w", op, err)
 	}

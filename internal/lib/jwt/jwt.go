@@ -12,12 +12,11 @@ const (
 	Refresh = "refresh"
 )
 
-func NewAccessToken(userID uuid.UUID, username string, duration time.Duration, secret string) (string, error) {
+func NewAccessToken(userID uuid.UUID, duration time.Duration, secret string) (string, error) {
 	token := jwt.New(jwt.SigningMethodHS256)
 
 	claims := token.Claims.(jwt.MapClaims)
 	claims["sub"] = userID
-	claims["uname"] = username
 	claims["exp"] = time.Now().Add(duration).Unix()
 	claims["iat"] = time.Now().Unix()
 	claims["typ"] = Access

@@ -29,6 +29,7 @@ type AuthService struct {
 type TokenProvider interface {
 	Create(
 		ctx context.Context,
+		familyID,
 		userID uuid.UUID,
 		tokenHash [32]byte,
 		status models.RefreshTokenStatus,
@@ -115,17 +116,7 @@ func (a *AuthService) Login(
 
 	log.Info("user logged is successfully")
 
-	oldRefresh, err := a.tokenProvider.GetLatestByUserID(ctx, user.ID)
-	if err != nil {
-		return "", "", err
-	}
-
-	accessToken, refreshToken, err := a.Refresh(ctx, oldRefresh.TokenHash)
-	if err != nil {
-		return "", "", err
-	}
-
-	return accessToken, refreshToken, nil
+	return a.CreateNewTokens(ctx, user.ID)
 }
 
 func (a *AuthService) RegisterUser(
@@ -166,7 +157,21 @@ func (a *AuthService) RegisterUser(
 
 	log.Info("new user registered")
 
-	_, refreshToken, err := a.CreateRefreshToken(ctx, userID)
+	return a.CreateNewTokens(ctx, userID)
+}
+
+func (a *AuthService) CreateNewTokens(ctx context.Context, userID uuid.UUID) (string, string, error) {
+	const op = "auth.CreateNewTokens"
+
+	log := a.log.With(
+		slog.String("op", op),
+	)
+
+	log.Info("creating new pair of tokens")
+
+	familyID := uuid.New()
+
+	refreshToken, err := a.CreateRefreshToken(ctx, familyID, userID)
 	if err != nil {
 		log.Error("failed to create refresh token", logger.Err(err))
 		return "", "", fmt.Errorf("%s: %w", op, err)
@@ -174,7 +179,7 @@ func (a *AuthService) RegisterUser(
 
 	log.Info("refresh token created")
 
-	accessToken, err := jwt.NewAccessToken(userID, username, a.accessTTL, a.tokenSecret)
+	accessToken, err := jwt.NewAccessToken(userID, a.accessTTL, a.tokenSecret)
 	if err != nil {
 		log.Error("failed to create access token", logger.Err(err))
 		return "", "", fmt.Errorf("%s: %w", op, err)
@@ -183,7 +188,7 @@ func (a *AuthService) RegisterUser(
 	return accessToken, refreshToken, nil
 }
 
-func (a *AuthService) CreateRefreshToken(ctx context.Context, userID uuid.UUID) (uuid.UUID, string, error) {
+func (a *AuthService) CreateRefreshToken(ctx context.Context, familyID, userID uuid.UUID) (string, error) {
 	const op = "auth.CreateRefreshToken"
 
 	log := a.log.With(
@@ -195,18 +200,18 @@ func (a *AuthService) CreateRefreshToken(ctx context.Context, userID uuid.UUID) 
 	tokenString, iat, exp, err := jwt.NewRefreshToken(userID, a.refreshTTL, a.tokenSecret)
 	if err != nil {
 		log.Error("failed to generate refresh token", logger.Err(err))
-		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
 	tokenHash := sha256.Sum256([]byte(tokenString))
-
-	tokenID, err := a.tokenProvider.Create(ctx, userID, tokenHash, models.Active, iat, exp)
-	if err != nil {
+	if _, err = a.tokenProvider.Create(ctx, familyID, userID, tokenHash, models.Active, iat, exp); err != nil {
 		log.Error("failed to save token", logger.Err(err))
-		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
-	return tokenID, tokenString, nil
+	log.Info("new refresh token created")
+
+	return tokenString, nil
 }
 
 func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token models.RefreshToken) error {
@@ -230,6 +235,8 @@ func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token model
 
 	return nil
 }
+
+// check input token status, if rotated (not active) - must rotated all tokens in this family else just create new pair of access and refresh using input family id
 
 func (a *AuthService) Refresh(ctx context.Context, tokenHash [32]byte) (string, string, error) {
 	const op = "auth.Refresh"
