@@ -7,6 +7,7 @@ import (
 	"voice-chat-api/internal/closer"
 	"voice-chat-api/internal/config"
 	handler "voice-chat-api/internal/handlers"
+	mw "voice-chat-api/internal/middlewares"
 	repo "voice-chat-api/internal/repositories"
 	service "voice-chat-api/internal/services"
 	"voice-chat-api/internal/storage"
@@ -113,7 +114,7 @@ func (c *diContainer) TokenHandler(ctx context.Context) *handler.TokenHandler {
 
 func (c *diContainer) Router(ctx context.Context) *chi.Mux {
 	if c.router == nil {
-		c.router = chi.NewMux()
+		c.router = chi.NewRouter()
 
 		c.router.Use(middleware.RequestID)
 		c.router.Use(middleware.RealIP)
@@ -127,6 +128,9 @@ func (c *diContainer) Router(ctx context.Context) *chi.Mux {
 			})
 			r.Route("/token", func(r chi.Router) {
 				r.Post("/refresh", c.TokenHandler(ctx).Refresh)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(mw.AuthMiddleware(c.secrets.JWTSecret))
 			})
 		})
 	}
