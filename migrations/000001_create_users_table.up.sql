@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS tokens
     token_hash BYTEA NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'active',
     expires_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_at TIMESTAMP NOT NULL
+    created_at TIMESTAMP NOT NULL,
 
     CONSTRAINT fk_tokens_user
         FOREIGN KEY (user_id)

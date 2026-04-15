@@ -37,11 +37,13 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 			tokenString, err := extractBearer(r.Header.Get("Authorization"))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
 			}
 
 			claims, err := jwt.VerifyToken(tokenString, secret)
 			if err != nil {
 				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
 			}
 
 			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)

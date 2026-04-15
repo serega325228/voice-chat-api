@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"sync"
 	"voice-chat-api/internal/closer"
 	"voice-chat-api/internal/config"
 	handler "voice-chat-api/internal/handlers"
@@ -17,6 +18,7 @@ import (
 )
 
 type diContainer struct {
+	m            sync.Mutex
 	cfg          *config.Config
 	secrets      *config.Secrets
 	log          *slog.Logger
@@ -39,6 +41,8 @@ func newDIContainer(cfg *config.Config, secrets *config.Secrets, log *slog.Logge
 }
 
 func (c *diContainer) Storage(ctx context.Context) *storage.Storage {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.storage == nil {
 		stg, err := storage.NewStorage(ctx, c.secrets, c.cfg)
 		if err != nil {
@@ -57,6 +61,8 @@ func (c *diContainer) Storage(ctx context.Context) *storage.Storage {
 }
 
 func (c *diContainer) Transactor(ctx context.Context) *storage.Transactor {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.transactor == nil {
 		c.transactor = storage.NewTransactor(c.Storage(ctx))
 	}
@@ -65,6 +71,8 @@ func (c *diContainer) Transactor(ctx context.Context) *storage.Transactor {
 }
 
 func (c *diContainer) UserRepo(ctx context.Context) *repo.UserRepo {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.userRepo == nil {
 		c.userRepo = repo.NewUserRepo(c.Transactor(ctx))
 	}
@@ -73,6 +81,8 @@ func (c *diContainer) UserRepo(ctx context.Context) *repo.UserRepo {
 }
 
 func (c *diContainer) TokenRepo(ctx context.Context) *repo.TokenRepo {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.tokenRepo == nil {
 		c.tokenRepo = repo.NewTokenRepo(c.Transactor(ctx))
 	}
@@ -81,6 +91,8 @@ func (c *diContainer) TokenRepo(ctx context.Context) *repo.TokenRepo {
 }
 
 func (c *diContainer) AuthService(ctx context.Context) *service.AuthService {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.authService == nil {
 		c.authService = service.NewAuthService(
 			c.log,
@@ -97,6 +109,8 @@ func (c *diContainer) AuthService(ctx context.Context) *service.AuthService {
 }
 
 func (c *diContainer) UserHandler(ctx context.Context) *handler.UserHandler {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.userHandler == nil {
 		c.userHandler = handler.NewUserHandler(c.log, c.AuthService(ctx))
 	}
@@ -105,6 +119,8 @@ func (c *diContainer) UserHandler(ctx context.Context) *handler.UserHandler {
 }
 
 func (c *diContainer) TokenHandler(ctx context.Context) *handler.TokenHandler {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.tokenHandler == nil {
 		c.tokenHandler = handler.NewTokenHandler(c.log, c.AuthService(ctx))
 	}
@@ -113,6 +129,8 @@ func (c *diContainer) TokenHandler(ctx context.Context) *handler.TokenHandler {
 }
 
 func (c *diContainer) Router(ctx context.Context) *chi.Mux {
+	c.m.Lock()
+	defer c.m.Unlock()
 	if c.router == nil {
 		c.router = chi.NewRouter()
 
@@ -127,10 +145,8 @@ func (c *diContainer) Router(ctx context.Context) *chi.Mux {
 				r.Post("/login", c.UserHandler(ctx).Login)
 			})
 			r.Route("/token", func(r chi.Router) {
-				r.Post("/refresh", c.TokenHandler(ctx).Refresh)
-			})
-			r.Group(func(r chi.Router) {
 				r.Use(mw.AuthMiddleware(c.secrets.JWTSecret))
+				r.Post("/refresh", c.TokenHandler(ctx).Refresh)
 			})
 		})
 	}

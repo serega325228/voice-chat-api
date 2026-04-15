@@ -47,6 +47,7 @@ func MustLoadSecrets() *Secrets {
 	var secrets Secrets
 
 	secrets.JWTSecret = os.Getenv("JWT_SECRET_KEY")
+	secrets.PostgresURL = os.Getenv("POSTGRES_URL")
 
 	return &secrets
 }

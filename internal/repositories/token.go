@@ -31,7 +31,15 @@ func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (models.R
 		WHERE token_hash = $1
 	`
 	var token models.RefreshToken
-	err := q.QueryRow(ctx, query, tokenHash).Scan(&token)
+	err := q.QueryRow(ctx, query, tokenHash).Scan(
+		&token.ID,
+		&token.TokenHash,
+		&token.Status,
+		&token.UserID,
+		&token.FamilyID,
+		&token.ExpiresAt,
+		&token.CreatedAt,
+	)
 	if err != nil {
 		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
 	}
@@ -48,7 +56,15 @@ func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (models.Refr
 		WHERE id = $1
 	`
 	var token models.RefreshToken
-	err := q.QueryRow(ctx, query, tokenID).Scan(&token)
+	err := q.QueryRow(ctx, query, tokenID).Scan(
+		&token.ID,
+		&token.TokenHash,
+		&token.Status,
+		&token.UserID,
+		&token.FamilyID,
+		&token.ExpiresAt,
+		&token.CreatedAt,
+	)
 	if err != nil {
 		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
 	}
@@ -85,7 +101,15 @@ func (r *TokenRepo) GetLatestByFamilyID(ctx context.Context, familyID uuid.UUID)
 		LIMIT 1;
 	`
 	var token models.RefreshToken
-	err := q.QueryRow(ctx, query, familyID).Scan(&token)
+	err := q.QueryRow(ctx, query, familyID).Scan(
+		&token.ID,
+		&token.TokenHash,
+		&token.Status,
+		&token.UserID,
+		&token.FamilyID,
+		&token.ExpiresAt,
+		&token.CreatedAt,
+	)
 	if err != nil {
 		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
 	}
@@ -121,7 +145,15 @@ func (r *TokenRepo) GetLatestByUserID(ctx context.Context, userID uuid.UUID) (mo
 		LIMIT 1;
 	`
 	var token models.RefreshToken
-	err := q.QueryRow(ctx, query, userID).Scan(&token)
+	err := q.QueryRow(ctx, query, userID).Scan(
+		&token.ID,
+		&token.TokenHash,
+		&token.Status,
+		&token.UserID,
+		&token.FamilyID,
+		&token.ExpiresAt,
+		&token.CreatedAt,
+	)
 	if err != nil {
 		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
 	}

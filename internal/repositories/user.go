@@ -25,7 +25,14 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (models.User, e
 		WHERE email = $1
 	`
 	var user models.User
-	err := q.QueryRow(ctx, query, email).Scan(&user)
+	err := q.QueryRow(ctx, query, email).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.PassHash,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
 	if err != nil {
 		return models.User{}, fmt.Errorf("%s: %w", op, err)
 	}
@@ -42,7 +49,14 @@ func (r *UserRepo) GetByID(ctx context.Context, userID uuid.UUID) (models.User, 
 		WHERE id = $1
 	`
 	var user models.User
-	err := q.QueryRow(ctx, query, userID).Scan(&user)
+	err := q.QueryRow(ctx, query, userID).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.PassHash,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
 	if err != nil {
 		return models.User{}, fmt.Errorf("%s: %w", op, err)
 	}
@@ -55,7 +69,7 @@ func (r *UserRepo) Create(ctx context.Context, username, email string, passHash 
 	q := r.qp.GetQuerier(ctx)
 	query := `
 		INSERT INTO users 
-		(username, email, password) 
+		(username, email, password_hash) 
 		VALUES ($1, $2, $3)
 		RETURNING id
 	`

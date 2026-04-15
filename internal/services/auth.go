@@ -241,7 +241,7 @@ func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string
 		slog.String("op", op),
 	)
 
-	_, err := jwt.VerifyToken(refreshString, a.tokenSecret)
+	claims, err := jwt.VerifyToken(refreshString, a.tokenSecret)
 	if err != nil {
 		return "", "", fmt.Errorf("%s: %w", op, err)
 	}
@@ -256,8 +256,13 @@ func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string
 			return fmt.Errorf("%s: %w", op, err)
 		}
 
+		if latestRefresh.UserID != claims.UserID {
+			log.Error("token user mismatch")
+			return errors.New("token user mismatch")
+		}
+
 		if latestRefresh.Status == models.Rotated {
-			log.Warn("token already is rotated")
+			log.Error("token already is rotated")
 			if err = a.tokenProvider.ChangeFamilyStatus(ctx, latestRefresh.FamilyID, models.Active, models.Rotated); err != nil {
 				return fmt.Errorf("%s: %w", op, ErrTokenAlreadyRotated)
 			}

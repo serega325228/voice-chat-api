@@ -9,5 +9,5 @@ jwt:
   access_ttl: "15m"
   refresh_ttl: "30d"
 postgres:
-  maxx_conns: "15"
+  max_conns: "15"
   health_check_period: "60s"

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
-	"voice-chat-api/cmd/migrator"
 	"voice-chat-api/internal/closer"
 	"voice-chat-api/internal/config"
 	"voice-chat-api/internal/lib/logger"
@@ -22,7 +21,6 @@ type App struct {
 func New() *App {
 	cfg := config.MustLoad()
 	secrets := config.MustLoadSecrets()
-	migrator.MustMigrate(secrets.PostgresURL)
 
 	log := logger.SetupLogger(cfg.Env)
 
