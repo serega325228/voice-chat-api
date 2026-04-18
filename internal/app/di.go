@@ -11,6 +11,7 @@ import (
 	mw "voice-chat-api/internal/middlewares"
 	repo "voice-chat-api/internal/repositories"
 	service "voice-chat-api/internal/services"
+	sessionstorage "voice-chat-api/internal/session_storage"
 	"voice-chat-api/internal/storage"
 
 	"github.com/go-chi/chi/v5"
@@ -18,18 +19,21 @@ import (
 )
 
 type diContainer struct {
-	m            sync.Mutex
-	cfg          *config.Config
-	secrets      *config.Secrets
-	log          *slog.Logger
-	storage      *storage.Storage
-	transactor   *storage.Transactor
-	userRepo     *repo.UserRepo
-	tokenRepo    *repo.TokenRepo
-	authService  *service.AuthService
-	userHandler  *handler.UserHandler
-	tokenHandler *handler.TokenHandler
-	router       *chi.Mux
+	m              sync.Mutex
+	cfg            *config.Config
+	secrets        *config.Secrets
+	log            *slog.Logger
+	storage        *storage.Storage
+	transactor     *storage.Transactor
+	sessionStorage *sessionstorage.SessionStorage
+	userRepo       *repo.UserRepo
+	tokenRepo      *repo.TokenRepo
+	authService    *service.AuthService
+	sessionService *service.SessionService
+	userHandler    *handler.UserHandler
+	tokenHandler   *handler.TokenHandler
+	wsHandler      *handler.WSHandler
+	router         *chi.Mux
 }
 
 func newDIContainer(cfg *config.Config, secrets *config.Secrets, log *slog.Logger) *diContainer {
@@ -70,6 +74,22 @@ func (c *diContainer) Transactor(ctx context.Context) *storage.Transactor {
 	return c.transactor
 }
 
+func (c *diContainer) SessionStorage(ctx context.Context) *sessionstorage.SessionStorage {
+	c.m.Lock()
+	defer c.m.Unlock()
+	if c.sessionStorage == nil {
+		stg := sessionstorage.NewSessionStorage()
+
+		// closer.Add("storage", func(_ context.Context) error {
+		// 	return stg.Close()
+		// })
+
+		c.sessionStorage = stg
+	}
+
+	return c.sessionStorage
+}
+
 func (c *diContainer) UserRepo(ctx context.Context) *repo.UserRepo {
 	c.m.Lock()
 	defer c.m.Unlock()
@@ -108,6 +128,25 @@ func (c *diContainer) AuthService(ctx context.Context) *service.AuthService {
 	return c.authService
 }
 
+func (c *diContainer) SessionService(ctx context.Context) *service.SessionService {
+	c.m.Lock()
+	defer c.m.Unlock()
+	if c.sessionService == nil {
+		c.sessionService = service.NewSessionService(
+			c.log,
+			c.SessionStorage(ctx),
+			// c.UserRepo(ctx),
+			// c.TokenRepo(ctx),
+			// c.Transactor(ctx),
+			// c.cfg.JWT.AccessTTL,
+			// c.cfg.JWT.RefreshTTL,
+			// c.secrets.JWTSecret,
+		)
+	}
+
+	return c.sessionService
+}
+
 func (c *diContainer) UserHandler(ctx context.Context) *handler.UserHandler {
 	c.m.Lock()
 	defer c.m.Unlock()
@@ -126,6 +165,16 @@ func (c *diContainer) TokenHandler(ctx context.Context) *handler.TokenHandler {
 	}
 
 	return c.tokenHandler
+}
+
+func (c *diContainer) WSHandler(ctx context.Context) *handler.WSHandler {
+	c.m.Lock()
+	defer c.m.Unlock()
+	if c.wsHandler == nil {
+		c.wsHandler = handler.NewWSHandler(c.log, c.SessionService(ctx))
+	}
+
+	return c.wsHandler
 }
 
 func (c *diContainer) Router(ctx context.Context) *chi.Mux {
@@ -147,6 +196,10 @@ func (c *diContainer) Router(ctx context.Context) *chi.Mux {
 			r.Route("/token", func(r chi.Router) {
 				r.Use(mw.AuthMiddleware(c.secrets.JWTSecret))
 				r.Post("/refresh", c.TokenHandler(ctx).Refresh)
+			})
+			r.Route("/ws", func(r chi.Router) {
+				r.Use(mw.AuthMiddleware(c.secrets.JWTSecret))
+				r.Post("/", c.WSHandler(ctx).Handle)
 			})
 		})
 	}

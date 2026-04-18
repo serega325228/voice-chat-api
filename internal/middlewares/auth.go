@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"voice-chat-api/internal/lib/jwt"
+
+	"github.com/google/uuid"
 )
 
 type contextKey string
@@ -25,8 +27,8 @@ func extractBearer(header string) (string, error) {
 	return strings.TrimPrefix(header, prefix), nil
 }
 
-func GetUserID(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(userIDKey).(string)
+func GetUserID(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(userIDKey).(uuid.UUID)
 	return id, ok
 }
 
