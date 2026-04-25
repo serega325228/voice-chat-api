@@ -5,6 +5,8 @@ http_server:
   close_timeout: "10s"
   timeout: "4s"
   idle_timeout: "60s"
+grpc:
+  address: "localhost:8081"
 jwt:
   access_ttl: "15m"
   refresh_ttl: "30d"

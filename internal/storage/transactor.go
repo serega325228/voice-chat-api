@@ -33,13 +33,15 @@ func (t *Transactor) WithTx(
 	ctx context.Context,
 	fn func(ctx context.Context) error,
 ) error {
+	const op = "Transactor.WithTx"
+
 	if _, ok := t.txFromContext(ctx); ok {
 		return fn(ctx)
 	}
 
 	tx, err := t.storage.Pool().Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	defer func() {
@@ -49,11 +51,11 @@ func (t *Transactor) WithTx(
 	txCtx := t.contextWithTx(ctx, tx)
 
 	if err := fn(txCtx); err != nil {
-		return err
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	if err := tx.Commit(txCtx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	return nil

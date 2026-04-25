@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"voice-chat-api/internal/lib/jwt"
@@ -14,14 +15,21 @@ type contextKey string
 
 const userIDKey contextKey = "userID"
 
+var (
+	errEmptyAuthorizationHeader = errors.New("empty authorization header")
+	errInvalidAuthHeader        = errors.New("invalid auth header")
+)
+
 func extractBearer(header string) (string, error) {
+	const op = "AuthMiddleware.ExtractBearer"
+
 	if header == "" {
-		return "", errors.New("empty authorization header")
+		return "", fmt.Errorf("%s: %w", op, errEmptyAuthorizationHeader)
 	}
 
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
-		return "", errors.New("invalid auth header")
+		return "", fmt.Errorf("%s: %w", op, errInvalidAuthHeader)
 	}
 
 	return strings.TrimPrefix(header, prefix), nil
@@ -42,7 +50,7 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			claims, err := jwt.VerifyToken(tokenString, secret)
+			claims, err := jwt.VerifyAccessToken(tokenString, secret)
 			if err != nil {
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return

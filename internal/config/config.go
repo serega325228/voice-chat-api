@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Env        string `yaml:"env" env:"ENV" env-default:"development"`
 	HTTPServer `yaml:"http_server"`
+	GRPC       `yaml:"grpc"`
 	Postgres   `yaml:"postgres"`
 	JWT        `yaml:"jwt"`
 }
@@ -22,6 +23,10 @@ type HTTPServer struct {
 	CloseTimeout    time.Duration `yaml:"close_timeout" env-default:"10s"`
 	Timeout         time.Duration `yaml:"timeout" env-default:"4s"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout" env-default:"60s"`
+}
+
+type GRPC struct {
+	Address string `yaml:"address" env-default:"localhost:8081"`
 }
 
 type Postgres struct {
@@ -40,14 +45,12 @@ type Secrets struct {
 }
 
 func MustLoadSecrets() *Secrets {
-	if err := godotenv.Load(); err != nil {
-		log.Fatal(".env file is not opened")
-	}
-
 	var secrets Secrets
+	_ = godotenv.Load()
 
-	secrets.JWTSecret = os.Getenv("JWT_SECRET_KEY")
-	secrets.PostgresURL = os.Getenv("POSTGRES_URL")
+	if err := cleanenv.ReadEnv(&secrets); err != nil {
+		log.Fatalf("cannot read secrets from env: %s", err)
+	}
 
 	return &secrets
 }

@@ -3,9 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"voice-chat-api/internal/dto"
+	service "voice-chat-api/internal/services"
 )
 
 type AuthService interface {
@@ -33,49 +35,61 @@ func NewUserHandler(log *slog.Logger, service AuthService) *UserHandler {
 }
 
 func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
-	const op = "user.Register"
 	var req dto.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		h.log.Error("failed to decode user data")
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		h.log.Error("failed to decode user data", "err", err)
 		return
 	}
 
 	access, refresh, err := h.service.RegisterUser(r.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		switch {
+		case errors.Is(err, service.ErrUserAlreadyExists):
+			http.Error(w, "user already exists", http.StatusConflict)
+		default:
+			h.log.Error("failed to register user", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
 	tokens := dto.TokenResponse{Access: access, Refresh: refresh}
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(tokens); err != nil {
-		h.log.Error("failed to encode tokens")
+		h.log.Error("failed to encode tokens", "err", err)
 		return
 	}
 }
 
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
-	const op = "user.Login"
 	var req dto.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		h.log.Error("failed to decode user data")
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		h.log.Error("failed to decode user data", "err", err)
 		return
 	}
 
 	access, refresh, err := h.service.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		switch {
+		case errors.Is(err, service.ErrInvalidCredentials):
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		default:
+			h.log.Error("failed to login user", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
 	tokens := dto.TokenResponse{Access: access, Refresh: refresh}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(tokens); err != nil {
-		h.log.Error("failed to encode tokens")
+		h.log.Error("failed to encode tokens", "err", err)
 		return
 	}
 }

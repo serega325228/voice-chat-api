@@ -64,6 +64,7 @@ type TxProvider interface {
 var (
 	ErrInvalidCredentials  = errors.New("invalid credentials")
 	ErrUserAlreadyExists   = errors.New("user already exists")
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrTokenAlreadyRotated = errors.New("token already is rotated")
 )
 
@@ -92,7 +93,7 @@ func (a *AuthService) Login(
 	email string,
 	password string,
 ) (string, string, error) {
-	const op = "auth.Login"
+	const op = "AuthService.Login"
 
 	log := a.log.With(
 		slog.String("op", op),
@@ -107,7 +108,7 @@ func (a *AuthService) Login(
 			return "", "", fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
 		}
 		log.Error("failed to get user", logger.Err(err))
-		return "", "", fmt.Errorf("%s: %w", op, ErrInvalidCredentials)
+		return "", "", fmt.Errorf("%s: %w", op, err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword(user.PassHash, []byte(password)); err != nil {
@@ -128,7 +129,7 @@ func (a *AuthService) RegisterUser(
 	email string,
 	password string,
 ) (string, string, error) {
-	const op = "auth.RegisterNewUser"
+	const op = "AuthService.RegisterUser"
 
 	log := a.log.With(
 		slog.String("op", op),
@@ -141,6 +142,10 @@ func (a *AuthService) RegisterUser(
 		log.Error("email already registered")
 		return "", "", fmt.Errorf("%s: %w", op, ErrUserAlreadyExists)
 	}
+	if !errors.Is(err, storageErrors.ErrUserNotFound) {
+		log.Error("failed to check existing user", logger.Err(err))
+		return "", "", fmt.Errorf("%s: %w", op, err)
+	}
 
 	passHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -150,7 +155,7 @@ func (a *AuthService) RegisterUser(
 
 	userID, err := a.userProvider.Create(ctx, username, email, passHash)
 	if err != nil {
-		if errors.Is(err, ErrUserAlreadyExists) {
+		if errors.Is(err, storageErrors.ErrUserExists) {
 			log.Error("email already registered")
 			return "", "", fmt.Errorf("%s: %w", op, ErrUserAlreadyExists)
 		}
@@ -166,7 +171,7 @@ func (a *AuthService) RegisterUser(
 }
 
 func (a *AuthService) CreateNewTokens(ctx context.Context, familyID, userID uuid.UUID) (string, string, error) {
-	const op = "auth.CreateNewTokens"
+	const op = "AuthService.CreateNewTokens"
 
 	log := a.log.With(
 		slog.String("op", op),
@@ -192,7 +197,7 @@ func (a *AuthService) CreateNewTokens(ctx context.Context, familyID, userID uuid
 }
 
 func (a *AuthService) CreateRefreshToken(ctx context.Context, familyID, userID uuid.UUID) (string, error) {
-	const op = "auth.CreateRefreshToken"
+	const op = "AuthService.CreateRefreshToken"
 
 	log := a.log.With(
 		slog.String("op", op),
@@ -218,7 +223,7 @@ func (a *AuthService) CreateRefreshToken(ctx context.Context, familyID, userID u
 }
 
 func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token models.RefreshToken) error {
-	const op = "auth.MarkRefreshTokenAsRotated"
+	const op = "AuthService.MarkRefreshTokenAsRotated"
 
 	log := a.log.With(
 		slog.String("op", op),
@@ -235,15 +240,15 @@ func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token model
 }
 
 func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string, string, error) {
-	const op = "auth.Refresh"
+	const op = "AuthService.Refresh"
 
 	log := a.log.With(
 		slog.String("op", op),
 	)
 
-	claims, err := jwt.VerifyToken(refreshString, a.tokenSecret)
+	claims, err := jwt.VerifyRefreshToken(refreshString, a.tokenSecret)
 	if err != nil {
-		return "", "", fmt.Errorf("%s: %w", op, err)
+		return "", "", fmt.Errorf("%s: %w", op, ErrInvalidRefreshToken)
 	}
 	tokenHash := sha256.Sum256([]byte(refreshString))
 
@@ -252,25 +257,40 @@ func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string
 	err = a.txProvider.WithTx(ctx, func(ctx context.Context) error {
 		latestRefresh, err := a.tokenProvider.GetByHash(ctx, tokenHash)
 		if err != nil {
+			if errors.Is(err, storageErrors.ErrTokenNotFound) {
+				log.Warn("refresh token not found", logger.Err(err))
+				return fmt.Errorf("%s: %w", op, ErrInvalidRefreshToken)
+			}
 			log.Error("failed find latest token by hash", logger.Err(err))
 			return fmt.Errorf("%s: %w", op, err)
 		}
 
 		if latestRefresh.UserID != claims.UserID {
 			log.Error("token user mismatch")
-			return errors.New("token user mismatch")
+			return fmt.Errorf("%s: %w", op, ErrInvalidRefreshToken)
 		}
 
 		if latestRefresh.Status == models.Rotated {
 			log.Error("token already is rotated")
 			if err = a.tokenProvider.ChangeFamilyStatus(ctx, latestRefresh.FamilyID, models.Active, models.Rotated); err != nil {
-				return fmt.Errorf("%s: %w", op, ErrTokenAlreadyRotated)
+				return fmt.Errorf("%s: %w", op, err)
 			}
+			return fmt.Errorf("%s: %w", op, ErrTokenAlreadyRotated)
+		}
+
+		if latestRefresh.Status != models.Active {
+			log.Error("token is not active", "status", latestRefresh.Status)
+			return fmt.Errorf("%s: %w", op, ErrInvalidRefreshToken)
+		}
+
+		if latestRefresh.ExpiresAt.Before(time.Now()) {
+			log.Error("token expired in storage")
+			return fmt.Errorf("%s: %w", op, ErrInvalidRefreshToken)
 		}
 
 		if err = a.MarkRefreshTokenAsRotated(ctx, latestRefresh); err != nil {
 			log.Error("failed mark token as rotated", logger.Err(err))
-			return err
+			return fmt.Errorf("%s: %w", op, err)
 		}
 
 		accessToken, refreshToken, err = a.CreateNewTokens(ctx, latestRefresh.FamilyID, latestRefresh.UserID)

@@ -14,13 +14,15 @@ type Storage struct {
 }
 
 func NewStorage(ctx context.Context, secrets *config.Secrets, cfg *config.Config) (*Storage, error) {
+	const op = "Storage.NewStorage"
+
 	if secrets.PostgresURL == "" {
-		return nil, errors.New("storage: empty connection url")
+		return nil, fmt.Errorf("%s: %w", op, errors.New("empty connection url"))
 	}
 
 	poolCfg, err := pgxpool.ParseConfig(secrets.PostgresURL)
 	if err != nil {
-		return nil, fmt.Errorf("storage: parse config: %w", err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	if cfg.Postgres.MaxConns > 0 {
@@ -32,14 +34,14 @@ func NewStorage(ctx context.Context, secrets *config.Secrets, cfg *config.Config
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
-		return nil, fmt.Errorf("storage: create pool: %w", err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	s := &Storage{pool: pool}
 
 	if err := s.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("storage: ping db: %w", err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	return s, nil
@@ -58,8 +60,13 @@ func (s *Storage) Pool() *pgxpool.Pool {
 }
 
 func (s *Storage) Ping(ctx context.Context) error {
+	const op = "Storage.Ping"
+
 	if s == nil || s.pool == nil {
-		return errors.New("storage: nil pool")
+		return fmt.Errorf("%s: %w", op, errors.New("nil pool"))
 	}
-	return s.pool.Ping(ctx)
+	if err := s.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return nil
 }

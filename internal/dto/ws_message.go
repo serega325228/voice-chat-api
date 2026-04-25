@@ -20,10 +20,25 @@ type OfferData struct {
 	SDP       string    `json:"sdp"`
 }
 
+type AnswerData struct {
+	SessionID uuid.UUID `json:"session_id"`
+	SDP       string    `json:"sdp"`
+}
+
 type IceCandidateData struct {
 	SessionID        uuid.UUID `json:"session_id"`
 	Candidate        string    `json:"candidate"`
 	SDPMid           string    `json:"sdp_mid"`
 	SDPMLineIndex    uint16    `json:"sdp_mline_index"`
 	UsernameFragment string    `json:"username_fragment,omitempty"`
+}
+
+type PeerClosedData struct {
+	SessionID uuid.UUID `json:"session_id"`
+	Reason    string    `json:"reason,omitempty"`
+}
+
+type ConnectionStateData struct {
+	SessionID uuid.UUID `json:"session_id"`
+	State     string    `json:"state"`
 }
