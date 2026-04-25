@@ -26,11 +26,11 @@ const (
 	iceCandidate  = "ice_candidate"
 )
 
-type SessionService interface {
+type SignalingService interface {
 	CreateSession(ctx context.Context, creator *models.Client) (uuid.UUID, error)
 	JoinSession(ctx context.Context, sessionID uuid.UUID, client *models.Client) error
-	ThrowOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error
-	ThrowCandidate(
+	SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error
+	SetCandidate(
 		ctx context.Context,
 		sessionID uuid.UUID,
 		candidate,
@@ -42,13 +42,13 @@ type SessionService interface {
 }
 
 type WSHandler struct {
-	service SessionService
+	service SignalingService
 	log     *slog.Logger
 }
 
 func NewWSHandler(
 	log *slog.Logger,
-	service SessionService,
+	service SignalingService,
 ) *WSHandler {
 	return &WSHandler{
 		log:     log,
@@ -149,7 +149,7 @@ func (h *WSHandler) readPump(ctx context.Context, c *models.Client) {
 		case webrtcOffer:
 			var offerData dto.OfferData
 			json.Unmarshal(m.Data, &offerData)
-			err := h.service.ThrowOffer(ctx, offerData.SessionID, offerData.SDP, c)
+			err := h.service.SetOffer(ctx, offerData.SessionID, offerData.SDP, c)
 			if err != nil {
 				continue
 			}
@@ -168,7 +168,7 @@ func (h *WSHandler) readPump(ctx context.Context, c *models.Client) {
 		case iceCandidate:
 			var candidateData dto.IceCandidateData
 			json.Unmarshal(m.Data, &candidateData)
-			if err := h.service.ThrowCandidate(
+			if err := h.service.SetCandidate(
 				ctx,
 				candidateData.SessionID,
 				candidateData.Candidate,

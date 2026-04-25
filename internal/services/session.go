@@ -50,7 +50,7 @@ func (s *SessionService) JoinSession(ctx context.Context, sessionID uuid.UUID, c
 	return nil
 }
 
-func (s *SessionService) ThrowOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
+func (s *SessionService) SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
 	session, err := s.storage.Get(sessionID)
 	if err != nil {
 		return err //TODO
@@ -70,7 +70,7 @@ func (s *SessionService) ThrowOffer(ctx context.Context, sessionID uuid.UUID, sd
 	return nil
 }
 
-func (s *SessionService) ThrowCandidate(
+func (s *SessionService) SetCandidate(
 	ctx context.Context,
 	sessionID uuid.UUID,
 	candidate,
