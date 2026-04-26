@@ -17,11 +17,9 @@ import (
 )
 
 const (
-	wsTypeWebRTCAnswer         = "webrtc_answer"
-	wsTypeICECandidate         = "ice_candidate"
-	wsTypePeerClosed           = "peer_closed"
-	wsTypeConnectionState      = "connection_state_changed"
-	initialConnectionStateName = "connected"
+	wsTypeWebRTCAnswer    = "webrtc_answer"
+	wsTypeICECandidate    = "ice_candidate"
+	wsRenegotiationNeeded = "renegotiation_needed"
 )
 
 type peerStream struct {
@@ -216,18 +214,18 @@ func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	if err := stream.Send(&sessionv1.SignalMessage{
-		SessionId: client.SessionID.String(),
-		PeerId:    client.PeerID.String(),
-		Payload: &sessionv1.SignalMessage_ConnectionStateChanged{
-			ConnectionStateChanged: &sessionv1.PeerConnectionStateChanged{
-				State: initialConnectionStateName,
-			},
-		},
-	}); err != nil {
-		cancel()
-		return fmt.Errorf("%s: %w", op, err)
-	}
+	// if err := stream.Send(&sessionv1.SignalMessage{
+	// 	SessionId: client.SessionID.String(),
+	// 	PeerId:    client.PeerID.String(),
+	// 	Payload: &sessionv1.SignalMessage_ConnectionStateChanged{
+	// 		ConnectionStateChanged: &sessionv1.PeerConnectionStateChanged{
+	// 			State: initialConnectionStateName,
+	// 		},
+	// 	},
+	// }); err != nil {
+	// 	cancel()
+	// 	return fmt.Errorf("%s: %w", op, err)
+	// }
 
 	s.mu.Lock()
 	if _, ok := s.streams[client.PeerID]; ok {
@@ -294,18 +292,9 @@ func (s *Service) forwardToWebSocket(client *models.Client, msg *sessionv1.Signa
 			return fmt.Errorf("%s: %w", op, err)
 		}
 		return nil
-	case *sessionv1.SignalMessage_PeerClosed:
-		if err := s.sendWSMessage(client, wsTypePeerClosed, dto.PeerClosedData{
+	case *sessionv1.SignalMessage_RenegotiationNeeded:
+		if err := s.sendWSMessage(client, wsRenegotiationNeeded, dto.RenegotiationNeededData{
 			SessionID: client.SessionID,
-			Reason:    payload.PeerClosed.GetReason(),
-		}); err != nil {
-			return fmt.Errorf("%s: %w", op, err)
-		}
-		return nil
-	case *sessionv1.SignalMessage_ConnectionStateChanged:
-		if err := s.sendWSMessage(client, wsTypeConnectionState, dto.ConnectionStateData{
-			SessionID: client.SessionID,
-			State:     payload.ConnectionStateChanged.GetState(),
 		}); err != nil {
 			return fmt.Errorf("%s: %w", op, err)
 		}
