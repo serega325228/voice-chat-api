@@ -55,6 +55,35 @@ func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (models.R
 	return token, nil
 }
 
+func (r *TokenRepo) GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error) {
+	const op = "TokenRepo.GetByHashForUpdate"
+	q := r.qp.GetQuerier(ctx)
+	query := `
+		SELECT ` + tokenColumns + `
+		FROM tokens
+		WHERE token_hash = $1
+		FOR UPDATE
+	`
+	var token models.RefreshToken
+	err := q.QueryRow(ctx, query, tokenHash).Scan(
+		&token.ID,
+		&token.TokenHash,
+		&token.Status,
+		&token.UserID,
+		&token.FamilyID,
+		&token.ExpiresAt,
+		&token.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.RefreshToken{}, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
+		}
+		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return token, nil
+}
+
 func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (models.RefreshToken, error) {
 	const op = "TokenRepo.GetByID"
 	q := r.qp.GetQuerier(ctx)

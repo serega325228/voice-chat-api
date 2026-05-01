@@ -83,12 +83,9 @@ func (s *Service) LeaveSession(ctx context.Context, client *models.Client) error
 
 	s.unregisterPeer(client.PeerID)
 
-	stream, cancel := client.TakeSignalStream()
+	_, cancel := client.TakeSignalStream()
 	if cancel != nil {
 		cancel()
-	}
-	if stream != nil {
-		_ = stream.CloseSend()
 	}
 
 	if client.SessionID == uuid.Nil {
@@ -110,19 +107,20 @@ func (s *Service) LeaveSession(ctx context.Context, client *models.Client) error
 func (s *Service) SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
 	const op = "SignalingService.SetOffer"
 
-	stream, err := s.getOrCreateStream(ctx, sessionID, client)
-	if err != nil {
+	if err := s.bindSession(ctx, sessionID, client); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	err = stream.Send(&sessionv1.SignalMessage{
-		SessionId: sessionID.String(),
-		PeerId:    client.PeerID.String(),
-		Payload: &sessionv1.SignalMessage_RemoteOffer{
-			RemoteOffer: &sessionv1.RemoteOffer{
-				Offer: &sessionv1.SessionDescription{
-					Type: sessionv1.SdpType_SDP_TYPE_OFFER,
-					Sdp:  sdp,
+	_, err := s.client.SendSignal(ctx, &sessionv1.SendSignalRequest{
+		Message: &sessionv1.SignalMessage{
+			SessionId: sessionID.String(),
+			PeerId:    client.PeerID.String(),
+			Payload: &sessionv1.SignalMessage_RemoteDescription{
+				RemoteDescription: &sessionv1.RemoteDescription{
+					Description: &sessionv1.SessionDescription{
+						Type: sessionv1.SdpType_SDP_TYPE_OFFER,
+						Sdp:  sdp,
+					},
 				},
 			},
 		},
@@ -137,19 +135,20 @@ func (s *Service) SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string,
 func (s *Service) SetAnswer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
 	const op = "SignalingService.SetAnswer"
 
-	stream, err := s.getOrCreateStream(ctx, sessionID, client)
-	if err != nil {
+	if err := s.bindSession(ctx, sessionID, client); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	err = stream.Send(&sessionv1.SignalMessage{
-		SessionId: sessionID.String(),
-		PeerId:    client.PeerID.String(),
-		Payload: &sessionv1.SignalMessage_LocalAnswer{
-			LocalAnswer: &sessionv1.LocalAnswer{
-				Answer: &sessionv1.SessionDescription{
-					Type: sessionv1.SdpType_SDP_TYPE_ANSWER,
-					Sdp:  sdp,
+	_, err := s.client.SendSignal(ctx, &sessionv1.SendSignalRequest{
+		Message: &sessionv1.SignalMessage{
+			SessionId: sessionID.String(),
+			PeerId:    client.PeerID.String(),
+			Payload: &sessionv1.SignalMessage_RemoteDescription{
+				RemoteDescription: &sessionv1.RemoteDescription{
+					Description: &sessionv1.SessionDescription{
+						Type: sessionv1.SdpType_SDP_TYPE_ANSWER,
+						Sdp:  sdp,
+					},
 				},
 			},
 		},
@@ -172,21 +171,22 @@ func (s *Service) SetCandidate(
 ) error {
 	const op = "SignalingService.SetCandidate"
 
-	stream, err := s.getOrCreateStream(ctx, sessionID, client)
-	if err != nil {
+	if err := s.bindSession(ctx, sessionID, client); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	err = stream.Send(&sessionv1.SignalMessage{
-		SessionId: sessionID.String(),
-		PeerId:    client.PeerID.String(),
-		Payload: &sessionv1.SignalMessage_RemoteIceCandidate{
-			RemoteIceCandidate: &sessionv1.RemoteIceCandidate{
-				Candidate: &sessionv1.IceCandidate{
-					Candidate:        candidate,
-					SdpMid:           sdpMID,
-					SdpMlineIndex:    int32(sdpMLineIndex),
-					UsernameFragment: usernameFragment,
+	_, err := s.client.SendSignal(ctx, &sessionv1.SendSignalRequest{
+		Message: &sessionv1.SignalMessage{
+			SessionId: sessionID.String(),
+			PeerId:    client.PeerID.String(),
+			Payload: &sessionv1.SignalMessage_RemoteIceCandidate{
+				RemoteIceCandidate: &sessionv1.RemoteIceCandidate{
+					Candidate: &sessionv1.IceCandidate{
+						Candidate:        candidate,
+						SdpMid:           sdpMID,
+						SdpMlineIndex:    int32(sdpMLineIndex),
+						UsernameFragment: usernameFragment,
+					},
 				},
 			},
 		},
@@ -198,31 +198,26 @@ func (s *Service) SetCandidate(
 	return nil
 }
 
-func (s *Service) getOrCreateStream(
+func (s *Service) bindSession(
 	ctx context.Context,
 	sessionID uuid.UUID,
 	client *models.Client,
-) (grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage], error) {
-	const op = "SignalingService.GetOrCreateStream"
+) error {
+	const op = "SignalingService.BindSession"
 
 	if client.SessionID == uuid.Nil {
 		client.SessionID = sessionID
 	}
 
 	if client.SessionID != sessionID {
-		return nil, fmt.Errorf("%s: %w", op, fmt.Errorf("peer %s already bound to session %s", client.PeerID, client.SessionID))
+		return fmt.Errorf("%s: %w", op, fmt.Errorf("peer %s already bound to session %s", client.PeerID, client.SessionID))
 	}
 
 	if err := s.ensureSignalStream(ctx, client); err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	stream, ok := client.GetSignalStream()
-	if !ok {
-		return nil, fmt.Errorf("%s: signal stream is not initialized", op)
-	}
-
-	return stream, nil
+	return nil
 }
 
 func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client) error {
@@ -235,28 +230,17 @@ func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client)
 	}
 
 	streamCtx, cancel := context.WithCancel(ctx)
-	stream, err := s.client.SignalPeer(streamCtx)
+	stream, err := s.client.OpenSignalStream(streamCtx, &sessionv1.OpenSignalStreamRequest{
+		SessionId: client.SessionID.String(),
+		PeerId:    client.PeerID.String(),
+	})
 	if err != nil {
 		cancel()
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	// if err := stream.Send(&sessionv1.SignalMessage{
-	// 	SessionId: client.SessionID.String(),
-	// 	PeerId:    client.PeerID.String(),
-	// 	Payload: &sessionv1.SignalMessage_ConnectionStateChanged{
-	// 		ConnectionStateChanged: &sessionv1.PeerConnectionStateChanged{
-	// 			State: initialConnectionStateName,
-	// 		},
-	// 	},
-	// }); err != nil {
-	// 	cancel()
-	// 	return fmt.Errorf("%s: %w", op, err)
-	// }
-
 	if _, ok := client.GetSignalStream(); ok {
 		cancel()
-		_ = stream.CloseSend()
 		return nil
 	}
 
@@ -269,7 +253,7 @@ func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client)
 
 func (s *Service) readLoop(
 	client *models.Client,
-	stream grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage],
+	stream grpc.ServerStreamingClient[sessionv1.SignalMessage],
 ) {
 	for {
 		msg, err := stream.Recv()
@@ -282,9 +266,7 @@ func (s *Service) readLoop(
 			if cancel != nil {
 				cancel()
 			}
-			if takenStream != nil {
-				_ = takenStream.CloseSend()
-			}
+			_ = takenStream
 			return
 		}
 
@@ -313,10 +295,14 @@ func (s *Service) forwardToWebSocket(msg *sessionv1.SignalMessage) error {
 	}
 
 	switch payload := msg.GetPayload().(type) {
-	case *sessionv1.SignalMessage_LocalAnswer:
+	case *sessionv1.SignalMessage_LocalDescription:
+		description := payload.LocalDescription.GetDescription()
+		if description.GetType() != sessionv1.SdpType_SDP_TYPE_ANSWER {
+			return nil
+		}
 		if err := s.sendWSMessage(client, wsTypeWebRTCAnswer, dto.AnswerData{
 			SessionID: sessionID,
-			SDP:       payload.LocalAnswer.GetAnswer().GetSdp(),
+			SDP:       description.GetSdp(),
 		}); err != nil {
 			return fmt.Errorf("%s: %w", op, err)
 		}

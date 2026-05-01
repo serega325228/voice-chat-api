@@ -37,6 +37,7 @@ type TokenProvider interface {
 		expires_at time.Time,
 	) (uuid.UUID, error)
 	GetByHash(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error)
+	GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error)
 	GetByID(ctx context.Context, tokenID uuid.UUID) (models.RefreshToken, error)
 	GetLatestByUserID(ctx context.Context, userID uuid.UUID) (models.RefreshToken, error)
 	ChangeStatus(ctx context.Context, tokenID uuid.UUID, status models.RefreshTokenStatus) error
@@ -255,7 +256,7 @@ func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string
 	var accessToken, refreshToken string
 
 	err = a.txProvider.WithTx(ctx, func(ctx context.Context) error {
-		latestRefresh, err := a.tokenProvider.GetByHash(ctx, tokenHash)
+		latestRefresh, err := a.tokenProvider.GetByHashForUpdate(ctx, tokenHash)
 		if err != nil {
 			if errors.Is(err, storageErrors.ErrTokenNotFound) {
 				log.Warn("refresh token not found", logger.Err(err))

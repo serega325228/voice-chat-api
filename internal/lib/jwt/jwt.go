@@ -37,6 +37,7 @@ func NewAccessToken(userID uuid.UUID, duration time.Duration, secret string) (st
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(duration)),
+			ID:        uuid.NewString(),
 		},
 	}
 
@@ -101,6 +102,7 @@ func NewRefreshToken(userID uuid.UUID, duration time.Duration, secret string) (s
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
+			ID:        uuid.NewString(),
 		},
 	}
 

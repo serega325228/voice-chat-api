@@ -16,26 +16,43 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-playground/validator/v10"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type diContainer struct {
-	m            sync.Mutex
-	cfg          *config.Config
-	secrets      *config.Secrets
-	log          *slog.Logger
-	storage      *storage.Storage
-	transactor   *storage.Transactor
-	userRepo     *repo.UserRepo
-	tokenRepo    *repo.TokenRepo
-	authService  *service.AuthService
-	grpcConn     *grpc.ClientConn
-	signalingSvc *grpcsignaling.Service
-	userHandler  *handler.UserHandler
-	tokenHandler *handler.TokenHandler
-	wsHandler    *handler.WSHandler
-	router       *chi.Mux
+	cfg     *config.Config
+	secrets *config.Secrets
+	log     *slog.Logger
+
+	storageOnce    sync.Once
+	storage        *storage.Storage
+	transactorOnce sync.Once
+	transactor     *storage.Transactor
+	userRepoOnce   sync.Once
+	userRepo       *repo.UserRepo
+	tokenRepoOnce  sync.Once
+	tokenRepo      *repo.TokenRepo
+
+	authServiceOnce sync.Once
+	authService     *service.AuthService
+	grpcConnOnce    sync.Once
+	grpcConn        *grpc.ClientConn
+	signalingOnce   sync.Once
+	signalingSvc    *grpcsignaling.Service
+
+	validatorOnce sync.Once
+	validator     *validator.Validate
+
+	userHandlerOnce  sync.Once
+	userHandler      *handler.UserHandler
+	tokenHandlerOnce sync.Once
+	tokenHandler     *handler.TokenHandler
+	wsHandlerOnce    sync.Once
+	wsHandler        *handler.WSHandler
+	routerOnce       sync.Once
+	router           *chi.Mux
 }
 
 func newDIContainer(cfg *config.Config, secrets *config.Secrets, log *slog.Logger) *diContainer {
@@ -47,256 +64,149 @@ func newDIContainer(cfg *config.Config, secrets *config.Secrets, log *slog.Logge
 }
 
 func (c *diContainer) Storage(ctx context.Context) *storage.Storage {
-	c.m.Lock()
-	if c.storage != nil {
-		defer c.m.Unlock()
-		return c.storage
-	}
-	c.m.Unlock()
+	c.storageOnce.Do(func() {
+		stg, err := storage.NewStorage(ctx, c.secrets, c.cfg)
+		if err != nil {
+			c.log.Error("failed to initialize storage", "err", err)
+			os.Exit(1)
+		}
 
-	stg, err := storage.NewStorage(ctx, c.secrets, c.cfg)
-	if err != nil {
-		c.log.Error("failed to initialize storage", "err", err)
-		os.Exit(1)
-	}
+		closer.Add("storage", func(_ context.Context) error {
+			return stg.Close()
+		})
 
-	closer.Add("storage", func(_ context.Context) error {
-		return stg.Close()
-	})
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.storage == nil {
 		c.storage = stg
-	}
+	})
 
 	return c.storage
 }
 
 func (c *diContainer) Transactor(ctx context.Context) *storage.Transactor {
-	c.m.Lock()
-	if c.transactor != nil {
-		defer c.m.Unlock()
-		return c.transactor
-	}
-	c.m.Unlock()
-
-	transactor := storage.NewTransactor(c.Storage(ctx))
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.transactor == nil {
-		c.transactor = transactor
-	}
+	c.transactorOnce.Do(func() {
+		c.transactor = storage.NewTransactor(c.Storage(ctx))
+	})
 
 	return c.transactor
 }
 
 func (c *diContainer) UserRepo(ctx context.Context) *repo.UserRepo {
-	c.m.Lock()
-	if c.userRepo != nil {
-		defer c.m.Unlock()
-		return c.userRepo
-	}
-	c.m.Unlock()
-
-	userRepo := repo.NewUserRepo(c.Transactor(ctx))
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.userRepo == nil {
-		c.userRepo = userRepo
-	}
+	c.userRepoOnce.Do(func() {
+		c.userRepo = repo.NewUserRepo(c.Transactor(ctx))
+	})
 
 	return c.userRepo
 }
 
 func (c *diContainer) TokenRepo(ctx context.Context) *repo.TokenRepo {
-	c.m.Lock()
-	if c.tokenRepo != nil {
-		defer c.m.Unlock()
-		return c.tokenRepo
-	}
-	c.m.Unlock()
-
-	tokenRepo := repo.NewTokenRepo(c.Transactor(ctx))
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.tokenRepo == nil {
-		c.tokenRepo = tokenRepo
-	}
+	c.tokenRepoOnce.Do(func() {
+		c.tokenRepo = repo.NewTokenRepo(c.Transactor(ctx))
+	})
 
 	return c.tokenRepo
 }
 
 func (c *diContainer) AuthService(ctx context.Context) *service.AuthService {
-	c.m.Lock()
-	if c.authService != nil {
-		defer c.m.Unlock()
-		return c.authService
-	}
-	c.m.Unlock()
-
-	authService := service.NewAuthService(
-		c.log,
-		c.UserRepo(ctx),
-		c.TokenRepo(ctx),
-		c.Transactor(ctx),
-		c.cfg.JWT.AccessTTL,
-		c.cfg.JWT.RefreshTTL,
-		c.secrets.JWTSecret,
-	)
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.authService == nil {
-		c.authService = authService
-	}
+	c.authServiceOnce.Do(func() {
+		c.authService = service.NewAuthService(
+			c.log,
+			c.UserRepo(ctx),
+			c.TokenRepo(ctx),
+			c.Transactor(ctx),
+			c.cfg.JWT.AccessTTL,
+			c.cfg.JWT.RefreshTTL,
+			c.secrets.JWTSecret,
+		)
+	})
 
 	return c.authService
 }
 
 func (c *diContainer) GRPCConn() *grpc.ClientConn {
-	c.m.Lock()
-	if c.grpcConn != nil {
-		defer c.m.Unlock()
-		return c.grpcConn
-	}
-	c.m.Unlock()
+	c.grpcConnOnce.Do(func() {
+		conn, err := grpc.NewClient(
+			c.cfg.GRPC.Address,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			c.log.Error("failed to initialize gRPC client", "err", err)
+			os.Exit(1)
+		}
 
-	conn, err := grpc.NewClient(
-		c.cfg.GRPC.Address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		c.log.Error("failed to initialize gRPC client", "err", err)
-		os.Exit(1)
-	}
+		closer.Add("grpc client", func(_ context.Context) error {
+			return conn.Close()
+		})
 
-	closer.Add("grpc client", func(_ context.Context) error {
-		return conn.Close()
-	})
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.grpcConn == nil {
 		c.grpcConn = conn
-	}
+	})
 
 	return c.grpcConn
 }
 
 func (c *diContainer) SignalingService() *grpcsignaling.Service {
-	c.m.Lock()
-	if c.signalingSvc != nil {
-		defer c.m.Unlock()
-		return c.signalingSvc
-	}
-	c.m.Unlock()
-
-	signalingSvc := grpcsignaling.New(c.log, c.GRPCConn())
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.signalingSvc == nil {
-		c.signalingSvc = signalingSvc
-	}
+	c.signalingOnce.Do(func() {
+		c.signalingSvc = grpcsignaling.New(c.log, c.GRPCConn())
+	})
 
 	return c.signalingSvc
 }
 
+func (c *diContainer) Validator() *validator.Validate {
+	c.validatorOnce.Do(func() {
+		c.validator = validator.New(validator.WithRequiredStructEnabled())
+	})
+
+	return c.validator
+}
+
 func (c *diContainer) UserHandler(ctx context.Context) *handler.UserHandler {
-	c.m.Lock()
-	if c.userHandler != nil {
-		defer c.m.Unlock()
-		return c.userHandler
-	}
-	c.m.Unlock()
-
-	userHandler := handler.NewUserHandler(c.log, c.AuthService(ctx))
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.userHandler == nil {
-		c.userHandler = userHandler
-	}
+	c.userHandlerOnce.Do(func() {
+		c.userHandler = handler.NewUserHandler(c.log, c.AuthService(ctx), c.Validator())
+	})
 
 	return c.userHandler
 }
 
 func (c *diContainer) TokenHandler(ctx context.Context) *handler.TokenHandler {
-	c.m.Lock()
-	if c.tokenHandler != nil {
-		defer c.m.Unlock()
-		return c.tokenHandler
-	}
-	c.m.Unlock()
-
-	tokenHandler := handler.NewTokenHandler(c.log, c.AuthService(ctx))
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.tokenHandler == nil {
-		c.tokenHandler = tokenHandler
-	}
+	c.tokenHandlerOnce.Do(func() {
+		c.tokenHandler = handler.NewTokenHandler(c.log, c.AuthService(ctx), c.Validator())
+	})
 
 	return c.tokenHandler
 }
 
 func (c *diContainer) WSHandler(ctx context.Context) *handler.WSHandler {
-	c.m.Lock()
-	if c.wsHandler != nil {
-		defer c.m.Unlock()
-		return c.wsHandler
-	}
-	c.m.Unlock()
-
-	wsHandler := handler.NewWSHandler(c.log, c.SignalingService())
-
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.wsHandler == nil {
-		c.wsHandler = wsHandler
-	}
+	c.wsHandlerOnce.Do(func() {
+		c.wsHandler = handler.NewWSHandler(c.log, c.SignalingService())
+	})
 
 	return c.wsHandler
 }
 
 func (c *diContainer) Router(ctx context.Context) *chi.Mux {
-	c.m.Lock()
-	if c.router != nil {
-		defer c.m.Unlock()
-		return c.router
-	}
-	c.m.Unlock()
+	c.routerOnce.Do(func() {
+		router := chi.NewRouter()
 
-	router := chi.NewRouter()
+		router.Use(middleware.RequestID)
+		router.Use(middleware.RealIP)
+		router.Use(middleware.Recoverer)
+		router.Use(middleware.URLFormat)
 
-	router.Use(middleware.RequestID)
-	router.Use(middleware.RealIP)
-	router.Use(middleware.Recoverer)
-	router.Use(middleware.URLFormat)
-
-	router.Route("/api", func(r chi.Router) {
-		r.Route("/user", func(r chi.Router) {
-			r.Post("/register", c.UserHandler(ctx).Register)
-			r.Post("/login", c.UserHandler(ctx).Login)
+		router.Route("/api", func(r chi.Router) {
+			r.Route("/user", func(r chi.Router) {
+				r.Post("/register", c.UserHandler(ctx).Register)
+				r.Post("/login", c.UserHandler(ctx).Login)
+			})
+			r.Route("/token", func(r chi.Router) {
+				r.Post("/refresh", c.TokenHandler(ctx).Refresh)
+			})
+			r.Route("/ws", func(r chi.Router) {
+				r.Use(mw.AuthMiddleware(c.secrets.JWTSecret))
+				r.Get("/", c.WSHandler(ctx).Handle)
+			})
 		})
-		r.Route("/token", func(r chi.Router) {
-			r.Post("/refresh", c.TokenHandler(ctx).Refresh)
-		})
-		r.Route("/ws", func(r chi.Router) {
-			r.Use(mw.AuthMiddleware(c.secrets.JWTSecret))
-			r.Get("/", c.WSHandler(ctx).Handle)
-		})
-	})
 
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.router == nil {
 		c.router = router
-	}
+	})
 
 	return c.router
 }

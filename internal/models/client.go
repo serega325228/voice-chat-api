@@ -25,7 +25,7 @@ type Client struct {
 	Done      chan struct{}
 
 	mu           sync.Mutex
-	signalStream grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage]
+	signalStream grpc.ServerStreamingClient[sessionv1.SignalMessage]
 	signalCancel context.CancelFunc
 }
 
@@ -40,7 +40,7 @@ func (c *Client) Enqueue(msg []byte) error {
 	}
 }
 
-func (c *Client) GetSignalStream() (grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage], bool) {
+func (c *Client) GetSignalStream() (grpc.ServerStreamingClient[sessionv1.SignalMessage], bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -52,7 +52,7 @@ func (c *Client) GetSignalStream() (grpc.BidiStreamingClient[sessionv1.SignalMes
 }
 
 func (c *Client) SetSignalStream(
-	stream grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage],
+	stream grpc.ServerStreamingClient[sessionv1.SignalMessage],
 	cancel context.CancelFunc,
 ) {
 	c.mu.Lock()
@@ -63,7 +63,7 @@ func (c *Client) SetSignalStream(
 }
 
 func (c *Client) TakeSignalStream() (
-	grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage],
+	grpc.ServerStreamingClient[sessionv1.SignalMessage],
 	context.CancelFunc,
 ) {
 	c.mu.Lock()

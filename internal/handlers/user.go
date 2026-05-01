@@ -6,9 +6,16 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"voice-chat-api/internal/dto"
 	service "voice-chat-api/internal/services"
 )
+
+const invalidRequestBodyMessage = "invalid request body"
+
+type Validator interface {
+	Struct(s any) error
+}
 
 type AuthService interface {
 	Login(
@@ -26,19 +33,28 @@ type AuthService interface {
 }
 
 type UserHandler struct {
-	log     *slog.Logger
-	service AuthService
+	log       *slog.Logger
+	service   AuthService
+	validator Validator
 }
 
-func NewUserHandler(log *slog.Logger, service AuthService) *UserHandler {
-	return &UserHandler{log: log, service: service}
+func NewUserHandler(log *slog.Logger, service AuthService, validator Validator) *UserHandler {
+	return &UserHandler{log: log, service: service, validator: validator}
 }
 
 func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req dto.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		http.Error(w, invalidRequestBodyMessage, http.StatusBadRequest)
 		h.log.Error("failed to decode user data", "err", err)
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
+
+	if err := h.validator.Struct(req); err != nil {
+		http.Error(w, invalidRequestBodyMessage, http.StatusBadRequest)
+		h.log.Warn("invalid register request", "err", err)
 		return
 	}
 
@@ -67,8 +83,15 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req dto.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		http.Error(w, invalidRequestBodyMessage, http.StatusBadRequest)
 		h.log.Error("failed to decode user data", "err", err)
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+
+	if err := h.validator.Struct(req); err != nil {
+		http.Error(w, invalidRequestBodyMessage, http.StatusBadRequest)
+		h.log.Warn("invalid login request", "err", err)
 		return
 	}
 
