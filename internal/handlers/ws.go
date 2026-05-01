@@ -37,6 +37,7 @@ const (
 	createSession    = "create_session"
 	joinSession      = "join_session"
 	webrtcOffer      = "webrtc_offer"
+	webrtcAnswer     = "webrtc_answer"
 	iceCandidate     = "ice_candidate"
 	wsSendBufferSize = 16
 )
@@ -46,6 +47,7 @@ type SignalingService interface {
 	JoinSession(ctx context.Context, sessionID uuid.UUID, client *models.Client) error
 	LeaveSession(ctx context.Context, client *models.Client) error
 	SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error
+	SetAnswer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error
 	SetCandidate(
 		ctx context.Context,
 		sessionID uuid.UUID,
@@ -165,6 +167,8 @@ func (h *WSHandler) readPump(ctx context.Context, c *models.Client) {
 			handleErr = h.handleJoinSession(ctx, c, m.Data)
 		case webrtcOffer:
 			handleErr = h.handleWebRTCOffer(ctx, c, m.Data)
+		case webrtcAnswer:
+			handleErr = h.handleWebRTCAnswer(ctx, c, m.Data)
 		case iceCandidate:
 			handleErr = h.handleICECandidate(ctx, c, m.Data)
 		default:
@@ -239,6 +243,31 @@ func (h *WSHandler) handleWebRTCOffer(ctx context.Context, c *models.Client, raw
 	}
 
 	if err := h.service.SetOffer(ctx, offerData.SessionID, offerData.SDP, c); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	if err := h.sendSuccessResponse(c); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (h *WSHandler) handleWebRTCAnswer(ctx context.Context, c *models.Client, rawData json.RawMessage) error {
+	const op = "WSHandler.HandleWebRTCAnswer"
+
+	var answerData dto.AnswerData
+	if err := json.Unmarshal(rawData, &answerData); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if answerData.SessionID == uuid.Nil {
+		return fmt.Errorf("%s: session_id is required", op)
+	}
+	if answerData.SDP == "" {
+		return fmt.Errorf("%s: sdp is required", op)
+	}
+
+	if err := h.service.SetAnswer(ctx, answerData.SessionID, answerData.SDP, c); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 

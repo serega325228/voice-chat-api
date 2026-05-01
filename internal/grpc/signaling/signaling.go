@@ -22,24 +22,19 @@ const (
 	wsRenegotiationNeeded = "renegotiation_needed"
 )
 
-type peerStream struct {
-	stream grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage]
-	cancel context.CancelFunc
-}
-
 type Service struct {
 	log    *slog.Logger
 	client sessionv1.SessionClient
 
-	mu      sync.Mutex
-	streams map[uuid.UUID]*peerStream
+	mu    sync.Mutex
+	peers map[uuid.UUID]*models.Client
 }
 
 func New(log *slog.Logger, conn *grpc.ClientConn) *Service {
 	return &Service{
-		log:     log,
-		client:  sessionv1.NewSessionClient(conn),
-		streams: make(map[uuid.UUID]*peerStream),
+		log:    log,
+		client: sessionv1.NewSessionClient(conn),
+		peers:  make(map[uuid.UUID]*models.Client),
 	}
 }
 
@@ -86,10 +81,14 @@ func (s *Service) JoinSession(ctx context.Context, sessionID uuid.UUID, client *
 func (s *Service) LeaveSession(ctx context.Context, client *models.Client) error {
 	const op = "SignalingService.LeaveSession"
 
-	stream := s.takePeerStream(client.PeerID)
+	s.unregisterPeer(client.PeerID)
+
+	stream, cancel := client.TakeSignalStream()
+	if cancel != nil {
+		cancel()
+	}
 	if stream != nil {
-		stream.cancel()
-		_ = stream.stream.CloseSend()
+		_ = stream.CloseSend()
 	}
 
 	if client.SessionID == uuid.Nil {
@@ -123,6 +122,33 @@ func (s *Service) SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string,
 			RemoteOffer: &sessionv1.RemoteOffer{
 				Offer: &sessionv1.SessionDescription{
 					Type: sessionv1.SdpType_SDP_TYPE_OFFER,
+					Sdp:  sdp,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (s *Service) SetAnswer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
+	const op = "SignalingService.SetAnswer"
+
+	stream, err := s.getOrCreateStream(ctx, sessionID, client)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	err = stream.Send(&sessionv1.SignalMessage{
+		SessionId: sessionID.String(),
+		PeerId:    client.PeerID.String(),
+		Payload: &sessionv1.SignalMessage_LocalAnswer{
+			LocalAnswer: &sessionv1.LocalAnswer{
+				Answer: &sessionv1.SessionDescription{
+					Type: sessionv1.SdpType_SDP_TYPE_ANSWER,
 					Sdp:  sdp,
 				},
 			},
@@ -191,21 +217,22 @@ func (s *Service) getOrCreateStream(
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	stream, ok := client.GetSignalStream()
+	if !ok {
+		return nil, fmt.Errorf("%s: signal stream is not initialized", op)
+	}
 
-	return s.streams[client.PeerID].stream, nil
+	return stream, nil
 }
 
 func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client) error {
 	const op = "SignalingService.EnsureSignalStream"
 
-	s.mu.Lock()
-	if _, ok := s.streams[client.PeerID]; ok {
-		s.mu.Unlock()
+	s.registerPeer(client)
+
+	if _, ok := client.GetSignalStream(); ok {
 		return nil
 	}
-	s.mu.Unlock()
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	stream, err := s.client.SignalPeer(streamCtx)
@@ -227,18 +254,13 @@ func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client)
 	// 	return fmt.Errorf("%s: %w", op, err)
 	// }
 
-	s.mu.Lock()
-	if _, ok := s.streams[client.PeerID]; ok {
-		s.mu.Unlock()
+	if _, ok := client.GetSignalStream(); ok {
 		cancel()
 		_ = stream.CloseSend()
 		return nil
 	}
-	s.streams[client.PeerID] = &peerStream{
-		stream: stream,
-		cancel: cancel,
-	}
-	s.mu.Unlock()
+
+	client.SetSignalStream(stream, cancel)
 
 	go s.readLoop(client, stream)
 
@@ -255,26 +277,45 @@ func (s *Service) readLoop(
 			if err != io.EOF && !errors.Is(err, context.Canceled) {
 				s.log.Warn("signal stream closed", "peer_id", client.PeerID, "session_id", client.SessionID, "err", err)
 			}
-			if peerStream := s.takePeerStream(client.PeerID); peerStream != nil {
-				peerStream.cancel()
-				_ = peerStream.stream.CloseSend()
+			takenStream, cancel := client.TakeSignalStream()
+			s.unregisterPeer(client.PeerID)
+			if cancel != nil {
+				cancel()
+			}
+			if takenStream != nil {
+				_ = takenStream.CloseSend()
 			}
 			return
 		}
 
-		if err := s.forwardToWebSocket(client, msg); err != nil {
+		if err := s.forwardToWebSocket(msg); err != nil {
 			s.log.Warn("failed to forward signaling message", "peer_id", client.PeerID, "session_id", client.SessionID, "err", err)
 		}
 	}
 }
 
-func (s *Service) forwardToWebSocket(client *models.Client, msg *sessionv1.SignalMessage) error {
+func (s *Service) forwardToWebSocket(msg *sessionv1.SignalMessage) error {
 	const op = "SignalingService.ForwardToWebSocket"
+
+	peerID, err := uuid.Parse(msg.GetPeerId())
+	if err != nil {
+		return fmt.Errorf("%s: parse peer_id: %w", op, err)
+	}
+
+	client, ok := s.getPeerClient(peerID)
+	if !ok {
+		return fmt.Errorf("%s: peer %s is not registered", op, peerID)
+	}
+
+	sessionID, err := s.sessionIDFromMessage(msg, client)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
 
 	switch payload := msg.GetPayload().(type) {
 	case *sessionv1.SignalMessage_LocalAnswer:
 		if err := s.sendWSMessage(client, wsTypeWebRTCAnswer, dto.AnswerData{
-			SessionID: client.SessionID,
+			SessionID: sessionID,
 			SDP:       payload.LocalAnswer.GetAnswer().GetSdp(),
 		}); err != nil {
 			return fmt.Errorf("%s: %w", op, err)
@@ -283,7 +324,7 @@ func (s *Service) forwardToWebSocket(client *models.Client, msg *sessionv1.Signa
 	case *sessionv1.SignalMessage_LocalIceCandidate:
 		candidate := payload.LocalIceCandidate.GetCandidate()
 		if err := s.sendWSMessage(client, wsTypeICECandidate, dto.IceCandidateData{
-			SessionID:        client.SessionID,
+			SessionID:        sessionID,
 			Candidate:        candidate.GetCandidate(),
 			SDPMid:           candidate.GetSdpMid(),
 			SDPMLineIndex:    uint16(candidate.GetSdpMlineIndex()),
@@ -294,7 +335,8 @@ func (s *Service) forwardToWebSocket(client *models.Client, msg *sessionv1.Signa
 		return nil
 	case *sessionv1.SignalMessage_RenegotiationNeeded:
 		if err := s.sendWSMessage(client, wsRenegotiationNeeded, dto.RenegotiationNeededData{
-			SessionID: client.SessionID,
+			SessionID: sessionID,
+			SDP:       payload.RenegotiationNeeded.GetOffer().GetSdp(),
 		}); err != nil {
 			return fmt.Errorf("%s: %w", op, err)
 		}
@@ -323,12 +365,40 @@ func (s *Service) sendWSMessage(client *models.Client, msgType string, payload a
 	return client.Enqueue(rawMessage)
 }
 
-func (s *Service) takePeerStream(peerID uuid.UUID) *peerStream {
+func (s *Service) registerPeer(client *models.Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stream := s.streams[peerID]
-	delete(s.streams, peerID)
+	s.peers[client.PeerID] = client
+}
 
-	return stream
+func (s *Service) getPeerClient(peerID uuid.UUID) (*models.Client, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	client, ok := s.peers[peerID]
+	return client, ok
+}
+
+func (s *Service) unregisterPeer(peerID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.peers, peerID)
+}
+
+func (s *Service) sessionIDFromMessage(msg *sessionv1.SignalMessage, client *models.Client) (uuid.UUID, error) {
+	if rawSessionID := msg.GetSessionId(); rawSessionID != "" {
+		sessionID, err := uuid.Parse(rawSessionID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("parse session_id: %w", err)
+		}
+		return sessionID, nil
+	}
+
+	if client.SessionID == uuid.Nil {
+		return uuid.Nil, errors.New("signal message missing session_id")
+	}
+
+	return client.SessionID, nil
 }

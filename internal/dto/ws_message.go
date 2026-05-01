@@ -35,4 +35,5 @@ type IceCandidateData struct {
 
 type RenegotiationNeededData struct {
 	SessionID uuid.UUID `json:"session_id"`
+	SDP       string    `json:"sdp"`
 }

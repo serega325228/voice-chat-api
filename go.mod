@@ -11,7 +11,7 @@ require (
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/jackc/pgx/v5 v5.5.4
 	github.com/joho/godotenv v1.5.1
-	github.com/serega325228/voice-chat-sfu-protos v0.0.4-0.20260423071430-33600fb5a3b1
+	github.com/serega325228/voice-chat-sfu-protos v0.0.6
 	golang.org/x/crypto v0.48.0
 	google.golang.org/grpc v1.80.0
 )
