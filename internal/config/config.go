@@ -13,6 +13,7 @@ type Config struct {
 	Env        string `yaml:"env" env:"ENV" env-default:"development"`
 	HTTPServer `yaml:"http_server"`
 	GRPC       `yaml:"grpc"`
+	Signaling  `yaml:"signaling"`
 	Postgres   `yaml:"postgres"`
 	JWT        `yaml:"jwt"`
 }
@@ -26,7 +27,23 @@ type HTTPServer struct {
 }
 
 type GRPC struct {
-	Address string `yaml:"address" env-default:"localhost:8081"`
+	Address   string        `yaml:"address" env-default:"localhost:8081"`
+	Keepalive GRPCKeepalive `yaml:"keepalive"`
+}
+
+type GRPCKeepalive struct {
+	Time                time.Duration `yaml:"time" env-default:"20s"`
+	Timeout             time.Duration `yaml:"timeout" env-default:"10s"`
+	PermitWithoutStream bool          `yaml:"permit_without_stream" env-default:"true"`
+}
+
+type Signaling struct {
+	EnqueueTimeout       time.Duration `yaml:"enqueue_timeout" env-default:"200ms"`
+	ReconnectMinDelay    time.Duration `yaml:"reconnect_min_delay" env-default:"250ms"`
+	ReconnectMaxDelay    time.Duration `yaml:"reconnect_max_delay" env-default:"5s"`
+	LeaveTimeout         time.Duration `yaml:"leave_timeout" env-default:"5s"`
+	ControlWriteTimeout  time.Duration `yaml:"control_write_timeout" env-default:"1s"`
+	WebSocketSendBufSize int           `yaml:"websocket_send_buffer_size" env-default:"128"`
 }
 
 type Postgres struct {

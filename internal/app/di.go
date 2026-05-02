@@ -19,6 +19,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 type diContainer struct {
@@ -126,6 +127,11 @@ func (c *diContainer) GRPCConn() *grpc.ClientConn {
 		conn, err := grpc.NewClient(
 			c.cfg.GRPC.Address,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                c.cfg.GRPC.Keepalive.Time,
+				Timeout:             c.cfg.GRPC.Keepalive.Timeout,
+				PermitWithoutStream: c.cfg.GRPC.Keepalive.PermitWithoutStream,
+			}),
 		)
 		if err != nil {
 			c.log.Error("failed to initialize gRPC client", "err", err)
@@ -144,7 +150,10 @@ func (c *diContainer) GRPCConn() *grpc.ClientConn {
 
 func (c *diContainer) SignalingService() *grpcsignaling.Service {
 	c.signalingOnce.Do(func() {
-		c.signalingSvc = grpcsignaling.New(c.log, c.GRPCConn())
+		c.signalingSvc = grpcsignaling.New(c.log, c.GRPCConn(), grpcsignaling.Config{
+			ReconnectMinDelay: c.cfg.Signaling.ReconnectMinDelay,
+			ReconnectMaxDelay: c.cfg.Signaling.ReconnectMaxDelay,
+		})
 	})
 
 	return c.signalingSvc
@@ -176,7 +185,12 @@ func (c *diContainer) TokenHandler(ctx context.Context) *handler.TokenHandler {
 
 func (c *diContainer) WSHandler(ctx context.Context) *handler.WSHandler {
 	c.wsHandlerOnce.Do(func() {
-		c.wsHandler = handler.NewWSHandler(c.log, c.SignalingService())
+		c.wsHandler = handler.NewWSHandler(c.log, c.SignalingService(), handler.WSHandlerConfig{
+			EnqueueTimeout:      c.cfg.Signaling.EnqueueTimeout,
+			LeaveTimeout:        c.cfg.Signaling.LeaveTimeout,
+			ControlWriteTimeout: c.cfg.Signaling.ControlWriteTimeout,
+			SendBufferSize:      c.cfg.Signaling.WebSocketSendBufSize,
+		})
 	})
 
 	return c.wsHandler

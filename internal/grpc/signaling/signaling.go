@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 	"voice-chat-api/internal/dto"
 	"voice-chat-api/internal/models"
 
@@ -22,18 +23,25 @@ const (
 	wsRenegotiationNeeded = "renegotiation_needed"
 )
 
+type Config struct {
+	ReconnectMinDelay time.Duration
+	ReconnectMaxDelay time.Duration
+}
+
 type Service struct {
 	log    *slog.Logger
 	client sessionv1.SessionClient
+	cfg    Config
 
 	mu    sync.Mutex
 	peers map[uuid.UUID]*models.Client
 }
 
-func New(log *slog.Logger, conn *grpc.ClientConn) *Service {
+func New(log *slog.Logger, conn *grpc.ClientConn, cfg Config) *Service {
 	return &Service{
 		log:    log,
 		client: sessionv1.NewSessionClient(conn),
+		cfg:    cfg,
 		peers:  make(map[uuid.UUID]*models.Client),
 	}
 }
@@ -52,7 +60,7 @@ func (s *Service) CreateSession(ctx context.Context, creator *models.Client) (uu
 	}
 
 	creator.SessionID = sessionID
-	if err := s.ensureSignalStream(ctx, creator); err != nil {
+	if err := s.ensureSignalStream(creator); err != nil {
 		return uuid.Nil, fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -71,7 +79,7 @@ func (s *Service) JoinSession(ctx context.Context, sessionID uuid.UUID, client *
 	}
 
 	client.SessionID = sessionID
-	if err := s.ensureSignalStream(ctx, client); err != nil {
+	if err := s.ensureSignalStream(client); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -107,15 +115,10 @@ func (s *Service) LeaveSession(ctx context.Context, client *models.Client) error
 	return nil
 }
 
-func (s *Service) SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
+func (s *Service) SetOffer(_ context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
 	const op = "SignalingService.SetOffer"
 
-	stream, err := s.getOrCreateStream(ctx, sessionID, client)
-	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	err = stream.Send(&sessionv1.SignalMessage{
+	err := s.sendSignalMessage(sessionID, client, &sessionv1.SignalMessage{
 		SessionId: sessionID.String(),
 		PeerId:    client.PeerID.String(),
 		Payload: &sessionv1.SignalMessage_RemoteDescription{
@@ -134,15 +137,10 @@ func (s *Service) SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string,
 	return nil
 }
 
-func (s *Service) SetAnswer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
+func (s *Service) SetAnswer(_ context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error {
 	const op = "SignalingService.SetAnswer"
 
-	stream, err := s.getOrCreateStream(ctx, sessionID, client)
-	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	err = stream.Send(&sessionv1.SignalMessage{
+	err := s.sendSignalMessage(sessionID, client, &sessionv1.SignalMessage{
 		SessionId: sessionID.String(),
 		PeerId:    client.PeerID.String(),
 		Payload: &sessionv1.SignalMessage_RemoteDescription{
@@ -162,7 +160,7 @@ func (s *Service) SetAnswer(ctx context.Context, sessionID uuid.UUID, sdp string
 }
 
 func (s *Service) SetCandidate(
-	ctx context.Context,
+	_ context.Context,
 	sessionID uuid.UUID,
 	candidate,
 	sdpMID,
@@ -172,12 +170,7 @@ func (s *Service) SetCandidate(
 ) error {
 	const op = "SignalingService.SetCandidate"
 
-	stream, err := s.getOrCreateStream(ctx, sessionID, client)
-	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	err = stream.Send(&sessionv1.SignalMessage{
+	err := s.sendSignalMessage(sessionID, client, &sessionv1.SignalMessage{
 		SessionId: sessionID.String(),
 		PeerId:    client.PeerID.String(),
 		Payload: &sessionv1.SignalMessage_RemoteIceCandidate{
@@ -198,11 +191,39 @@ func (s *Service) SetCandidate(
 	return nil
 }
 
-func (s *Service) getOrCreateStream(
-	ctx context.Context,
+func (s *Service) sendSignalMessage(
 	sessionID uuid.UUID,
 	client *models.Client,
-) (grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage], error) {
+	msg *sessionv1.SignalMessage,
+) error {
+	const op = "SignalingService.sendSignalMessage"
+
+	stream, err := s.getOrCreateStream(sessionID, client)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	if err := stream.Send(msg); err == nil {
+		return nil
+	}
+
+	s.log.Warn("signal send failed, recreating stream", "peer_id", client.PeerID, "session_id", sessionID, "err", err)
+	s.resetSpecificSignalStream(client, stream)
+
+	stream, err = s.getOrCreateStream(sessionID, client)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	if err := stream.Send(msg); err != nil {
+		s.resetSpecificSignalStream(client, stream)
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (s *Service) getOrCreateStream(sessionID uuid.UUID, client *models.Client) (grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage], error) {
 	const op = "SignalingService.GetOrCreateStream"
 
 	if client.SessionID == uuid.Nil {
@@ -213,7 +234,7 @@ func (s *Service) getOrCreateStream(
 		return nil, fmt.Errorf("%s: %w", op, fmt.Errorf("peer %s already bound to session %s", client.PeerID, client.SessionID))
 	}
 
-	if err := s.ensureSignalStream(ctx, client); err != nil {
+	if err := s.ensureSignalStream(client); err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -225,24 +246,33 @@ func (s *Service) getOrCreateStream(
 	return stream, nil
 }
 
-func (s *Service) ensureSignalStream(ctx context.Context, client *models.Client) error {
+func (s *Service) ensureSignalStream(client *models.Client) error {
 	const op = "SignalingService.EnsureSignalStream"
 
 	s.registerPeer(client)
+	client.LockSignalStreamInit()
+	defer client.UnlockSignalStreamInit()
 
 	if _, ok := client.GetSignalStream(); ok {
 		return nil
 	}
 
-	streamCtx, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancel(context.Background())
 	stream, err := s.client.SignalPeer(streamCtx)
 	if err != nil {
 		cancel()
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
+	if err := s.sendAttachHandshake(stream, client); err != nil {
+		cancel()
+		_ = stream.CloseSend()
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
 	if _, ok := client.GetSignalStream(); ok {
 		cancel()
+		_ = stream.CloseSend()
 		return nil
 	}
 
@@ -263,21 +293,99 @@ func (s *Service) readLoop(
 			if err != io.EOF && !errors.Is(err, context.Canceled) {
 				s.log.Warn("signal stream closed", "peer_id", client.PeerID, "session_id", client.SessionID, "err", err)
 			}
-			takenStream, cancel := client.TakeSignalStream()
-			s.unregisterPeer(client.PeerID)
-			if cancel != nil {
-				cancel()
-			}
-			if takenStream != nil {
-				_ = takenStream.CloseSend()
-			}
+			s.resetSpecificSignalStream(client, stream)
+			s.scheduleReconnect(client)
 			return
 		}
 
 		if err := s.forwardToWebSocket(msg); err != nil {
 			s.log.Warn("failed to forward signaling message", "peer_id", client.PeerID, "session_id", client.SessionID, "err", err)
+			if errors.Is(err, models.ErrClientBackpressured) {
+				_ = client.Conn.Close()
+				return
+			}
 		}
 	}
+}
+
+func (s *Service) sendAttachHandshake(stream grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage], client *models.Client) error {
+	const op = "SignalingService.sendAttachHandshake"
+
+	if client.SessionID == uuid.Nil {
+		return fmt.Errorf("%s: peer %s is not bound to session", op, client.PeerID)
+	}
+
+	if err := stream.Send(&sessionv1.SignalMessage{
+		SessionId: client.SessionID.String(),
+		PeerId:    client.PeerID.String(),
+	}); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (s *Service) scheduleReconnect(client *models.Client) {
+	if client.SessionID == uuid.Nil {
+		return
+	}
+	if !client.StartReconnect() {
+		return
+	}
+
+	go s.reconnectLoop(client)
+}
+
+func (s *Service) reconnectLoop(client *models.Client) {
+	defer client.FinishReconnect()
+
+	delay := s.cfg.ReconnectMinDelay
+
+	for {
+		if client.SessionID == uuid.Nil {
+			return
+		}
+
+		select {
+		case <-client.Done:
+			return
+		case <-time.After(delay):
+		}
+
+		err := s.ensureSignalStream(client)
+		if err == nil {
+			s.log.Info("signal stream reattached", "peer_id", client.PeerID, "session_id", client.SessionID)
+			return
+		}
+
+		s.log.Warn("failed to reattach signal stream", "peer_id", client.PeerID, "session_id", client.SessionID, "err", err)
+		delay *= 2
+		if delay > s.cfg.ReconnectMaxDelay {
+			delay = s.cfg.ReconnectMaxDelay
+		}
+	}
+}
+
+func (s *Service) resetSignalStream(client *models.Client) {
+	stream, cancel := client.TakeSignalStream()
+	if cancel != nil {
+		cancel()
+	}
+	if stream != nil {
+		_ = stream.CloseSend()
+	}
+}
+
+func (s *Service) resetSpecificSignalStream(
+	client *models.Client,
+	stream grpc.BidiStreamingClient[sessionv1.SignalMessage, sessionv1.SignalMessage],
+) {
+	currentStream, ok := client.GetSignalStream()
+	if !ok || currentStream != stream {
+		return
+	}
+
+	s.resetSignalStream(client)
 }
 
 func (s *Service) forwardToWebSocket(msg *sessionv1.SignalMessage) error {

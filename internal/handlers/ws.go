@@ -34,13 +34,19 @@ var upgrader = websocket.Upgrader{
 }
 
 const (
-	createSession    = "create_session"
-	joinSession      = "join_session"
-	webrtcOffer      = "webrtc_offer"
-	webrtcAnswer     = "webrtc_answer"
-	iceCandidate     = "ice_candidate"
-	wsSendBufferSize = 16
+	createSession = "create_session"
+	joinSession   = "join_session"
+	webrtcOffer   = "webrtc_offer"
+	webrtcAnswer  = "webrtc_answer"
+	iceCandidate  = "ice_candidate"
 )
+
+type WSHandlerConfig struct {
+	EnqueueTimeout      time.Duration
+	LeaveTimeout        time.Duration
+	ControlWriteTimeout time.Duration
+	SendBufferSize      int
+}
 
 type SignalingService interface {
 	CreateSession(ctx context.Context, creator *models.Client) (uuid.UUID, error)
@@ -62,15 +68,18 @@ type SignalingService interface {
 type WSHandler struct {
 	service SignalingService
 	log     *slog.Logger
+	cfg     WSHandlerConfig
 }
 
 func NewWSHandler(
 	log *slog.Logger,
 	service SignalingService,
+	cfg WSHandlerConfig,
 ) *WSHandler {
 	return &WSHandler{
 		log:     log,
 		service: service,
+		cfg:     cfg,
 	}
 }
 
@@ -90,23 +99,24 @@ func (h *WSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		_ = conn.WriteControl(
 			websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "missing user context"),
-			time.Now().Add(time.Second),
+			time.Now().Add(h.cfg.ControlWriteTimeout),
 		)
 		return
 	}
 
 	client := &models.Client{
-		UserID:    userID,
-		PeerID:    uuid.New(),
-		SessionID: uuid.Nil,
-		Conn:      conn,
-		Send:      make(chan []byte, wsSendBufferSize),
-		Done:      make(chan struct{}),
+		UserID:         userID,
+		PeerID:         uuid.New(),
+		SessionID:      uuid.Nil,
+		Conn:           conn,
+		Send:           make(chan []byte, h.cfg.SendBufferSize),
+		Done:           make(chan struct{}),
+		EnqueueTimeout: h.cfg.EnqueueTimeout,
 	}
 	defer close(client.Done)
 
 	defer func() {
-		leaveCtx, leaveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		leaveCtx, leaveCancel := context.WithTimeout(context.Background(), h.cfg.LeaveTimeout)
 		defer leaveCancel()
 		if err := h.service.LeaveSession(leaveCtx, client); err != nil {
 			h.log.Warn("failed to leave session", "peer_id", client.PeerID, "err", err)

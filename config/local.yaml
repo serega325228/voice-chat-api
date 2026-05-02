@@ -7,6 +7,17 @@ http_server:
   idle_timeout: "60s"
 grpc:
   address: "localhost:8081"
+  keepalive:
+    time: "20s"
+    timeout: "10s"
+    permit_without_stream: true
+signaling:
+  enqueue_timeout: "200ms"
+  reconnect_min_delay: "250ms"
+  reconnect_max_delay: "5s"
+  leave_timeout: "5s"
+  control_write_timeout: "1s"
+  websocket_send_buffer_size: 128
 jwt:
   access_ttl: "15m"
   refresh_ttl: "30d"
