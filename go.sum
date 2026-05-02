@@ -93,8 +93,10 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
-github.com/serega325228/voice-chat-sfu-protos v0.0.7 h1:TjJtMKCEpFmGN0RR4KiB835QwcaUhzPrFRqhyZWD82g=
-github.com/serega325228/voice-chat-sfu-protos v0.0.7/go.mod h1:bKHle2flDNr0ODqXKfakh+7yGkvsxLWka68xR8Gdt+o=
+github.com/serega325228/voice-chat-sfu-protos v0.0.8 h1:370jQL1+/YC05zkobTgbVtKqrZC2z9eG+TiHUam3eFM=
+github.com/serega325228/voice-chat-sfu-protos v0.0.8/go.mod h1:bKHle2flDNr0ODqXKfakh+7yGkvsxLWka68xR8Gdt+o=
+github.com/serega325228/voice-chat-sfu-protos v0.0.9 h1:SDiQ6hERzsvN4Y8V8sE6vgh0xZ86Tf2QEgNOZl6wg5c=
+github.com/serega325228/voice-chat-sfu-protos v0.0.9/go.mod h1:bKHle2flDNr0ODqXKfakh+7yGkvsxLWka68xR8Gdt+o=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
