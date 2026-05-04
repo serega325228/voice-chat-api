@@ -22,7 +22,7 @@ func NewUserRepo(querierProvider QuerierProvider) *UserRepo {
 	return &UserRepo{qp: querierProvider}
 }
 
-func (r *UserRepo) GetByEmail(ctx context.Context, email string) (models.User, error) {
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*models.User, error) {
 	const op = "UserRepo.GetByEmail"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -41,15 +41,15 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (models.User, e
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.User{}, fmt.Errorf("%s: %w", op, storageErrors.ErrUserNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrUserNotFound)
 		}
-		return models.User{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return user, nil
+	return &user, nil
 }
 
-func (r *UserRepo) GetByID(ctx context.Context, userID uuid.UUID) (models.User, error) {
+func (r *UserRepo) GetByID(ctx context.Context, userID uuid.UUID) (*models.User, error) {
 	const op = "UserRepo.GetByID"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -68,20 +68,20 @@ func (r *UserRepo) GetByID(ctx context.Context, userID uuid.UUID) (models.User, 
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.User{}, fmt.Errorf("%s: %w", op, storageErrors.ErrUserNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrUserNotFound)
 		}
-		return models.User{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return user, nil
+	return &user, nil
 }
 
 func (r *UserRepo) Create(ctx context.Context, username, email string, passHash []byte) (uuid.UUID, error) {
 	const op = "UserRepo.Create"
 	q := r.qp.GetQuerier(ctx)
 	query := `
-		INSERT INTO users 
-		(username, email, password_hash) 
+		INSERT INTO users
+		(username, email, password_hash)
 		VALUES ($1, $2, $3)
 		RETURNING id
 	`

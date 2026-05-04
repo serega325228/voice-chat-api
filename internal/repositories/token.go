@@ -27,7 +27,7 @@ func NewTokenRepo(querierProvider QuerierProvider) *TokenRepo {
 	return &TokenRepo{qp: querierProvider}
 }
 
-func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error) {
+func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetByHash"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -47,15 +47,15 @@ func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (models.R
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.RefreshToken{}, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
 		}
-		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return token, nil
+	return &token, nil
 }
 
-func (r *TokenRepo) GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error) {
+func (r *TokenRepo) GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetByHashForUpdate"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -76,15 +76,15 @@ func (r *TokenRepo) GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) 
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.RefreshToken{}, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
 		}
-		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return token, nil
+	return &token, nil
 }
 
-func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (models.RefreshToken, error) {
+func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetByID"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -104,12 +104,12 @@ func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (models.Refr
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.RefreshToken{}, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
 		}
-		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return token, nil
+	return &token, nil
 }
 
 func (r *TokenRepo) Create(ctx context.Context, familyID, userID uuid.UUID, tokenHash [32]byte, status models.RefreshTokenStatus, created_at, expires_at time.Time) (uuid.UUID, error) {
@@ -130,7 +130,7 @@ func (r *TokenRepo) Create(ctx context.Context, familyID, userID uuid.UUID, toke
 	return id, nil
 }
 
-func (r *TokenRepo) GetLatestByFamilyID(ctx context.Context, familyID uuid.UUID) (models.RefreshToken, error) {
+func (r *TokenRepo) GetLatestByFamilyID(ctx context.Context, familyID uuid.UUID) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetLatestByFamilyID"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -152,12 +152,12 @@ func (r *TokenRepo) GetLatestByFamilyID(ctx context.Context, familyID uuid.UUID)
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.RefreshToken{}, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
 		}
-		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return token, nil
+	return &token, nil
 }
 
 func (r *TokenRepo) ChangeFamilyStatus(ctx context.Context, familyID uuid.UUID, statusBefore, statusAfter models.RefreshTokenStatus) error {
@@ -177,7 +177,7 @@ func (r *TokenRepo) ChangeFamilyStatus(ctx context.Context, familyID uuid.UUID, 
 	return nil
 }
 
-func (r *TokenRepo) GetLatestByUserID(ctx context.Context, userID uuid.UUID) (models.RefreshToken, error) {
+func (r *TokenRepo) GetLatestByUserID(ctx context.Context, userID uuid.UUID) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetLatestByUserID"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -199,12 +199,12 @@ func (r *TokenRepo) GetLatestByUserID(ctx context.Context, userID uuid.UUID) (mo
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.RefreshToken{}, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
+			return nil, fmt.Errorf("%s: %w", op, storageErrors.ErrTokenNotFound)
 		}
-		return models.RefreshToken{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	return token, nil
+	return &token, nil
 }
 
 func (r *TokenRepo) ChangeStatus(ctx context.Context, tokenID uuid.UUID, status models.RefreshTokenStatus) error {

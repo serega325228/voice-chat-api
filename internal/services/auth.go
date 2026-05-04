@@ -36,17 +36,17 @@ type TokenProvider interface {
 		created_at,
 		expires_at time.Time,
 	) (uuid.UUID, error)
-	GetByHash(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error)
-	GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (models.RefreshToken, error)
-	GetByID(ctx context.Context, tokenID uuid.UUID) (models.RefreshToken, error)
-	GetLatestByUserID(ctx context.Context, userID uuid.UUID) (models.RefreshToken, error)
+	GetByHash(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error)
+	GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error)
+	GetByID(ctx context.Context, tokenID uuid.UUID) (*models.RefreshToken, error)
+	GetLatestByUserID(ctx context.Context, userID uuid.UUID) (*models.RefreshToken, error)
 	ChangeStatus(ctx context.Context, tokenID uuid.UUID, status models.RefreshTokenStatus) error
 	ChangeFamilyStatus(ctx context.Context, familyID uuid.UUID, statusBefore, statusAfter models.RefreshTokenStatus) error
 }
 
 type UserProvider interface {
-	GetByEmail(ctx context.Context, email string) (models.User, error)
-	GetByID(ctx context.Context, userID uuid.UUID) (models.User, error)
+	GetByEmail(ctx context.Context, email string) (*models.User, error)
+	GetByID(ctx context.Context, userID uuid.UUID) (*models.User, error)
 	Create(
 		ctx context.Context,
 		username string,
@@ -223,7 +223,7 @@ func (a *AuthService) CreateRefreshToken(ctx context.Context, familyID, userID u
 	return tokenString, nil
 }
 
-func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token models.RefreshToken) error {
+func (a *AuthService) MarkRefreshTokenAsRotated(ctx context.Context, token *models.RefreshToken) error {
 	const op = "AuthService.MarkRefreshTokenAsRotated"
 
 	log := a.log.With(
