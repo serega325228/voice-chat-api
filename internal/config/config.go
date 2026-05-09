@@ -53,7 +53,7 @@ type Postgres struct {
 
 type JWT struct {
 	AccessTTL  time.Duration `yaml:"access_ttl" env-default:"15m"`
-	RefreshTTL time.Duration `yaml:"refresh_ttl" env-default:"30d"`
+	RefreshTTL time.Duration `yaml:"refresh_ttl" env-default:"720h"`
 }
 
 type Secrets struct {
