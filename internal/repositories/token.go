@@ -27,7 +27,7 @@ func NewTokenRepo(querierProvider QuerierProvider) *TokenRepo {
 	return &TokenRepo{qp: querierProvider}
 }
 
-func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error) {
+func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash []byte) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetByHash"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -55,7 +55,7 @@ func (r *TokenRepo) GetByHash(ctx context.Context, tokenHash [32]byte) (*models.
 	return &token, nil
 }
 
-func (r *TokenRepo) GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error) {
+func (r *TokenRepo) GetByHashForUpdate(ctx context.Context, tokenHash []byte) (*models.RefreshToken, error) {
 	const op = "TokenRepo.GetByHashForUpdate"
 	q := r.qp.GetQuerier(ctx)
 	query := `
@@ -112,12 +112,12 @@ func (r *TokenRepo) GetByID(ctx context.Context, tokenID uuid.UUID) (*models.Ref
 	return &token, nil
 }
 
-func (r *TokenRepo) Create(ctx context.Context, familyID, userID uuid.UUID, tokenHash [32]byte, status models.RefreshTokenStatus, created_at, expires_at time.Time) (uuid.UUID, error) {
+func (r *TokenRepo) Create(ctx context.Context, familyID, userID uuid.UUID, tokenHash []byte, status models.RefreshTokenStatus, created_at, expires_at time.Time) (uuid.UUID, error) {
 	const op = "TokenRepo.Create"
 	q := r.qp.GetQuerier(ctx)
 	query := `
 		INSERT INTO tokens
-		(family_id, user_id, token_hash, status, created_at, expires_at) 
+		(family_id, user_id, token_hash, status, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
 	`
@@ -211,7 +211,7 @@ func (r *TokenRepo) ChangeStatus(ctx context.Context, tokenID uuid.UUID, status 
 	const op = "TokenRepo.ChangeStatus"
 	q := r.qp.GetQuerier(ctx)
 	query := `
-		UPDATE tokens 
+		UPDATE tokens
 		SET status = $1
 		WHERE id = $2
 	`

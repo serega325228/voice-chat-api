@@ -72,7 +72,7 @@ func (m *MockTokenProvider) Create(
 	ctx context.Context,
 	familyID uuid.UUID,
 	userID uuid.UUID,
-	tokenHash [32]byte,
+	tokenHash []byte,
 	status models.RefreshTokenStatus,
 	createdAt time.Time,
 	expiresAt time.Time,

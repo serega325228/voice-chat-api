@@ -8,7 +8,7 @@ import (
 
 type RefreshToken struct {
 	ID        uuid.UUID
-	TokenHash [32]byte
+	TokenHash []byte
 	Status    RefreshTokenStatus
 	UserID    uuid.UUID
 	FamilyID  uuid.UUID

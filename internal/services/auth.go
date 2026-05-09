@@ -31,13 +31,13 @@ type TokenProvider interface {
 		ctx context.Context,
 		familyID,
 		userID uuid.UUID,
-		tokenHash [32]byte,
+		tokenHash []byte,
 		status models.RefreshTokenStatus,
 		created_at,
 		expires_at time.Time,
 	) (uuid.UUID, error)
-	GetByHash(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error)
-	GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error)
+	GetByHash(ctx context.Context, tokenHash []byte) (*models.RefreshToken, error)
+	GetByHashForUpdate(ctx context.Context, tokenHash []byte) (*models.RefreshToken, error)
 	GetByID(ctx context.Context, tokenID uuid.UUID) (*models.RefreshToken, error)
 	GetLatestByUserID(ctx context.Context, userID uuid.UUID) (*models.RefreshToken, error)
 	ChangeStatus(ctx context.Context, tokenID uuid.UUID, status models.RefreshTokenStatus) error
@@ -213,7 +213,7 @@ func (a *AuthService) CreateRefreshToken(ctx context.Context, familyID, userID u
 	}
 
 	tokenHash := sha256.Sum256([]byte(tokenString))
-	if _, err = a.tokenProvider.Create(ctx, familyID, userID, tokenHash, models.Active, iat, exp); err != nil {
+	if _, err = a.tokenProvider.Create(ctx, familyID, userID, tokenHash[:], models.Active, iat, exp); err != nil {
 		log.Error("failed to save token", logger.Err(err))
 		return "", fmt.Errorf("%s: %w", op, err)
 	}
@@ -256,7 +256,7 @@ func (a *AuthService) Refresh(ctx context.Context, refreshString string) (string
 	var accessToken, refreshToken string
 
 	err = a.txProvider.WithTx(ctx, func(ctx context.Context) error {
-		latestRefresh, err := a.tokenProvider.GetByHashForUpdate(ctx, tokenHash)
+		latestRefresh, err := a.tokenProvider.GetByHashForUpdate(ctx, tokenHash[:])
 		if err != nil {
 			if errors.Is(err, storageErrors.ErrTokenNotFound) {
 				log.Warn("refresh token not found", logger.Err(err))
