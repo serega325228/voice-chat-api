@@ -10,11 +10,14 @@ import (
 	"sync"
 	"time"
 	"voice-chat-api/internal/dto"
+	appjwt "voice-chat-api/internal/lib/jwt"
 	"voice-chat-api/internal/models"
 
 	"github.com/google/uuid"
 	sessionv1 "github.com/serega325228/voice-chat-sfu-protos/gen/go/session"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -23,9 +26,13 @@ const (
 	wsRenegotiationNeeded = "renegotiation_needed"
 )
 
+var ErrRoomNotFound = errors.New("room not found")
+
 type Config struct {
 	ReconnectMinDelay time.Duration
 	ReconnectMaxDelay time.Duration
+	ReconnectTokenTTL time.Duration
+	TokenSecret       string
 }
 
 type Service struct {
@@ -46,7 +53,7 @@ func New(log *slog.Logger, conn *grpc.ClientConn, cfg Config) *Service {
 	}
 }
 
-func (s *Service) CreateSession(ctx context.Context, creator *models.Client) (uuid.UUID, error) {
+func (s *Service) CreateSession(ctx context.Context, creator *models.Client) (uuid.UUID, string, error) {
 	const op = "SignalingService.CreateSession"
 
 	sessionID := uuid.New()
@@ -56,18 +63,23 @@ func (s *Service) CreateSession(ctx context.Context, creator *models.Client) (uu
 		PeerId:    creator.PeerID.String(),
 	})
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("%s: %w", op, err)
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
 	}
 
 	creator.SessionID = sessionID
 	if err := s.ensureSignalStream(creator); err != nil {
-		return uuid.Nil, fmt.Errorf("%s: %w", op, err)
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
 	}
 
-	return sessionID, nil
+	reconnectToken, err := s.newReconnectToken(creator)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	return sessionID, reconnectToken, nil
 }
 
-func (s *Service) JoinSession(ctx context.Context, sessionID uuid.UUID, client *models.Client) error {
+func (s *Service) JoinSession(ctx context.Context, sessionID uuid.UUID, client *models.Client) (string, error) {
 	const op = "SignalingService.JoinSession"
 
 	_, err := s.client.JoinSession(ctx, &sessionv1.JoinSessionRequest{
@@ -75,21 +87,59 @@ func (s *Service) JoinSession(ctx context.Context, sessionID uuid.UUID, client *
 		PeerId:    client.PeerID.String(),
 	})
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return "", fmt.Errorf("%s: %w", op, normalizeSFUError(err))
 	}
 
 	client.SessionID = sessionID
 	if err := s.ensureSignalStream(client); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	}
 
-	return nil
+	reconnectToken, err := s.newReconnectToken(client)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	return reconnectToken, nil
+}
+
+func (s *Service) ResumeSession(ctx context.Context, reconnectToken string, client *models.Client) (uuid.UUID, string, error) {
+	const op = "SignalingService.ResumeSession"
+
+	claims, err := appjwt.VerifyReconnectToken(reconnectToken, s.cfg.TokenSecret)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, normalizeSFUError(err))
+	}
+	if claims.UserID != client.UserID {
+		return uuid.Nil, "", fmt.Errorf("%s: reconnect token user mismatch", op)
+	}
+
+	client.PeerID = claims.PeerID
+	client.SessionID = claims.SessionID
+
+	_, err = s.client.JoinSession(ctx, &sessionv1.JoinSessionRequest{
+		SessionId: claims.SessionID.String(),
+		PeerId:    claims.PeerID.String(),
+	})
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
+	}
+	if err := s.ensureSignalStream(client); err != nil {
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	nextToken, err := s.newReconnectToken(client)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	return claims.SessionID, nextToken, nil
 }
 
 func (s *Service) LeaveSession(ctx context.Context, client *models.Client) error {
 	const op = "SignalingService.LeaveSession"
 
-	s.unregisterPeer(client.PeerID)
+	currentClient := s.unregisterPeerClient(client)
 
 	stream, cancel := client.TakeSignalStream()
 	if cancel != nil {
@@ -100,6 +150,9 @@ func (s *Service) LeaveSession(ctx context.Context, client *models.Client) error
 	}
 
 	if client.SessionID == uuid.Nil {
+		return nil
+	}
+	if !currentClient {
 		return nil
 	}
 
@@ -478,11 +531,17 @@ func (s *Service) getPeerClient(peerID uuid.UUID) (*models.Client, bool) {
 	return client, ok
 }
 
-func (s *Service) unregisterPeer(peerID uuid.UUID) {
+func (s *Service) unregisterPeerClient(client *models.Client) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.peers, peerID)
+	current, ok := s.peers[client.PeerID]
+	if !ok || current != client {
+		return false
+	}
+
+	delete(s.peers, client.PeerID)
+	return true
 }
 
 func (s *Service) sessionIDFromMessage(msg *sessionv1.SignalMessage, client *models.Client) (uuid.UUID, error) {
@@ -499,4 +558,21 @@ func (s *Service) sessionIDFromMessage(msg *sessionv1.SignalMessage, client *mod
 	}
 
 	return client.SessionID, nil
+}
+
+func (s *Service) newReconnectToken(client *models.Client) (string, error) {
+	ttl := s.cfg.ReconnectTokenTTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+
+	return appjwt.NewReconnectToken(client.UserID, client.SessionID, client.PeerID, ttl, s.cfg.TokenSecret)
+}
+
+func normalizeSFUError(err error) error {
+	if status.Code(err) == codes.NotFound {
+		return ErrRoomNotFound
+	}
+
+	return err
 }

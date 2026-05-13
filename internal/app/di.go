@@ -153,6 +153,8 @@ func (c *diContainer) SignalingService() *grpcsignaling.Service {
 		c.signalingSvc = grpcsignaling.New(c.log, c.GRPCConn(), grpcsignaling.Config{
 			ReconnectMinDelay: c.cfg.Signaling.ReconnectMinDelay,
 			ReconnectMaxDelay: c.cfg.Signaling.ReconnectMaxDelay,
+			ReconnectTokenTTL: c.cfg.Signaling.ReconnectTokenTTL,
+			TokenSecret:       c.secrets.JWTSecret,
 		})
 	})
 
@@ -189,6 +191,10 @@ func (c *diContainer) WSHandler(ctx context.Context) *handler.WSHandler {
 			EnqueueTimeout:      c.cfg.Signaling.EnqueueTimeout,
 			LeaveTimeout:        c.cfg.Signaling.LeaveTimeout,
 			ControlWriteTimeout: c.cfg.Signaling.ControlWriteTimeout,
+			PongWait:            c.cfg.Signaling.WebSocketPongWait,
+			PingPeriod:          c.cfg.Signaling.WebSocketPingPeriod,
+			WriteTimeout:        c.cfg.Signaling.WebSocketWriteTimeout,
+			ReadLimit:           c.cfg.Signaling.WebSocketReadLimit,
 			SendBufferSize:      c.cfg.Signaling.WebSocketSendBufSize,
 		})
 	})

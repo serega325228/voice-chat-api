@@ -86,7 +86,7 @@ func (m *MockTokenProvider) Create(
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
-func (m *MockTokenProvider) GetByHash(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error) {
+func (m *MockTokenProvider) GetByHash(ctx context.Context, tokenHash []byte) (*models.RefreshToken, error) {
 	args := m.Called(ctx, tokenHash)
 
 	if args.Get(0) == nil {
@@ -96,7 +96,7 @@ func (m *MockTokenProvider) GetByHash(ctx context.Context, tokenHash [32]byte) (
 	return args.Get(0).(*models.RefreshToken), args.Error(1)
 }
 
-func (m *MockTokenProvider) GetByHashForUpdate(ctx context.Context, tokenHash [32]byte) (*models.RefreshToken, error) {
+func (m *MockTokenProvider) GetByHashForUpdate(ctx context.Context, tokenHash []byte) (*models.RefreshToken, error) {
 	args := m.Called(ctx, tokenHash)
 
 	if args.Get(0) == nil {
@@ -195,7 +195,7 @@ func TestAuthService_Login(t *testing.T) {
 						ctx,
 						mock.AnythingOfType("uuid.UUID"),
 						userID,
-						mock.AnythingOfType("[32]uint8"),
+						mock.AnythingOfType("[]uint8"),
 						models.Active,
 						mock.AnythingOfType("time.Time"),
 						mock.AnythingOfType("time.Time"),
@@ -268,7 +268,7 @@ func TestAuthService_Login(t *testing.T) {
 						ctx,
 						mock.AnythingOfType("uuid.UUID"),
 						userID,
-						mock.AnythingOfType("[32]uint8"),
+						mock.AnythingOfType("[]uint8"),
 						models.Active,
 						mock.AnythingOfType("time.Time"),
 						mock.AnythingOfType("time.Time"),
@@ -360,7 +360,7 @@ func TestAuthService_RegisterUser(t *testing.T) {
 						ctx,
 						mock.AnythingOfType("uuid.UUID"),
 						userID,
-						mock.AnythingOfType("[32]uint8"),
+						mock.AnythingOfType("[]uint8"),
 						models.Active,
 						mock.AnythingOfType("time.Time"),
 						mock.AnythingOfType("time.Time"),
@@ -500,8 +500,8 @@ func TestAuthService_CreateRefreshToken(t *testing.T) {
 				ctx,
 				familyID,
 				userID,
-				mock.MatchedBy(func(hash [32]byte) bool {
-					return hash != [32]byte{}
+				mock.MatchedBy(func(hash []byte) bool {
+					return len(hash) == sha256.Size
 				}),
 				models.Active,
 				mock.MatchedBy(func(createdAt time.Time) bool {
@@ -534,7 +534,7 @@ func TestAuthService_CreateRefreshToken(t *testing.T) {
 				ctx,
 				familyID,
 				userID,
-				mock.AnythingOfType("[32]uint8"),
+				mock.AnythingOfType("[]uint8"),
 				models.Active,
 				mock.AnythingOfType("time.Time"),
 				mock.AnythingOfType("time.Time"),
@@ -572,7 +572,7 @@ func TestAuthService_CreateNewTokens(t *testing.T) {
 				ctx,
 				familyID,
 				userID,
-				mock.AnythingOfType("[32]uint8"),
+				mock.AnythingOfType("[]uint8"),
 				models.Active,
 				mock.AnythingOfType("time.Time"),
 				mock.AnythingOfType("time.Time"),
@@ -602,7 +602,7 @@ func TestAuthService_CreateNewTokens(t *testing.T) {
 				ctx,
 				familyID,
 				userID,
-				mock.AnythingOfType("[32]uint8"),
+				mock.AnythingOfType("[]uint8"),
 				models.Active,
 				mock.AnythingOfType("time.Time"),
 				mock.AnythingOfType("time.Time"),
@@ -701,7 +701,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(nil, storageErrors.ErrTokenNotFound).
 			Once()
 
@@ -727,7 +727,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(nil, upstreamErr).
 			Once()
 
@@ -753,7 +753,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    otherUserID,
@@ -784,7 +784,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -819,7 +819,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -855,7 +855,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -886,7 +886,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -917,7 +917,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -953,7 +953,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -972,7 +972,7 @@ func TestAuthService_Refresh(t *testing.T) {
 				ctx,
 				familyID,
 				userID,
-				mock.AnythingOfType("[32]uint8"),
+				mock.AnythingOfType("[]uint8"),
 				models.Active,
 				mock.AnythingOfType("time.Time"),
 				mock.AnythingOfType("time.Time"),
@@ -1002,7 +1002,7 @@ func TestAuthService_Refresh(t *testing.T) {
 
 		tokenRepo := new(MockTokenProvider)
 		tokenRepo.
-			On("GetByHashForUpdate", ctx, expectedHash).
+			On("GetByHashForUpdate", ctx, expectedHash[:]).
 			Return(&models.RefreshToken{
 				ID:        tokenID,
 				UserID:    userID,
@@ -1021,7 +1021,7 @@ func TestAuthService_Refresh(t *testing.T) {
 				ctx,
 				familyID,
 				userID,
-				mock.AnythingOfType("[32]uint8"),
+				mock.AnythingOfType("[]uint8"),
 				models.Active,
 				mock.AnythingOfType("time.Time"),
 				mock.AnythingOfType("time.Time"),

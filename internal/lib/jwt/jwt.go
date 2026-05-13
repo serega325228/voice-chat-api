@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	Access  = "access"
-	Refresh = "refresh"
+	Access    = "access"
+	Refresh   = "refresh"
+	Reconnect = "reconnect"
 )
 
 var (
@@ -24,6 +25,14 @@ var (
 type Claims struct {
 	UserID uuid.UUID `json:"sub"`
 	Type   string    `json:"typ"`
+	jwt.RegisteredClaims
+}
+
+type ReconnectClaims struct {
+	UserID    uuid.UUID `json:"sub"`
+	SessionID uuid.UUID `json:"sid"`
+	PeerID    uuid.UUID `json:"pid"`
+	Type      string    `json:"type"`
 	jwt.RegisteredClaims
 }
 
@@ -57,6 +66,62 @@ func VerifyAccessToken(tokenString string, secret string) (*Claims, error) {
 
 func VerifyRefreshToken(tokenString string, secret string) (*Claims, error) {
 	return verifyToken(tokenString, secret, Refresh)
+}
+
+func NewReconnectToken(userID, sessionID, peerID uuid.UUID, duration time.Duration, secret string) (string, error) {
+	const op = "JWT.NewReconnectToken"
+
+	now := time.Now()
+	claims := ReconnectClaims{
+		UserID:    userID,
+		SessionID: sessionID,
+		PeerID:    peerID,
+		Type:      Reconnect,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(duration)),
+			ID:        uuid.NewString(),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	return tokenString, nil
+}
+
+func VerifyReconnectToken(tokenString string, secret string) (*ReconnectClaims, error) {
+	const op = "JWT.VerifyReconnectToken"
+
+	token, err := jwt.ParseWithClaims(tokenString, &ReconnectClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("%s: %w", op, fmt.Errorf("%w: %s", errUnexpectedSigningMethod, token.Method.Alg()))
+		}
+
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	claims, ok := token.Claims.(*ReconnectClaims)
+	if !ok {
+		return nil, fmt.Errorf("%s: %w", op, errInvalidClaims)
+	}
+	if !token.Valid {
+		return nil, fmt.Errorf("%s: %w", op, errInvalidToken)
+	}
+	if claims.Type != Reconnect {
+		return nil, fmt.Errorf("%s: %w", op, ErrInvalidTokenType)
+	}
+	if claims.UserID == uuid.Nil || claims.SessionID == uuid.Nil || claims.PeerID == uuid.Nil {
+		return nil, fmt.Errorf("%s: %w", op, errInvalidClaims)
+	}
+
+	return claims, nil
 }
 
 func verifyToken(tokenString string, secret string, expectedType string) (*Claims, error) {

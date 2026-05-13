@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"voice-chat-api/internal/dto"
+	grpcsignaling "voice-chat-api/internal/grpc/signaling"
 	mw "voice-chat-api/internal/middlewares"
 	"voice-chat-api/internal/models"
 
@@ -36,6 +38,7 @@ var upgrader = websocket.Upgrader{
 const (
 	createSession = "create_session"
 	joinSession   = "join_session"
+	resumeSession = "resume_session"
 	webrtcOffer   = "webrtc_offer"
 	webrtcAnswer  = "webrtc_answer"
 	iceCandidate  = "ice_candidate"
@@ -45,12 +48,17 @@ type WSHandlerConfig struct {
 	EnqueueTimeout      time.Duration
 	LeaveTimeout        time.Duration
 	ControlWriteTimeout time.Duration
+	PongWait            time.Duration
+	PingPeriod          time.Duration
+	WriteTimeout        time.Duration
+	ReadLimit           int64
 	SendBufferSize      int
 }
 
 type SignalingService interface {
-	CreateSession(ctx context.Context, creator *models.Client) (uuid.UUID, error)
-	JoinSession(ctx context.Context, sessionID uuid.UUID, client *models.Client) error
+	CreateSession(ctx context.Context, creator *models.Client) (uuid.UUID, string, error)
+	JoinSession(ctx context.Context, sessionID uuid.UUID, client *models.Client) (string, error)
+	ResumeSession(ctx context.Context, reconnectToken string, client *models.Client) (uuid.UUID, string, error)
 	LeaveSession(ctx context.Context, client *models.Client) error
 	SetOffer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error
 	SetAnswer(ctx context.Context, sessionID uuid.UUID, sdp string, client *models.Client) error
@@ -90,6 +98,7 @@ func (h *WSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	h.configureConn(conn)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -130,11 +139,25 @@ func (h *WSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 func (h *WSHandler) writePump(ctx context.Context, c *models.Client) {
 	defer c.Conn.Close()
 
+	pingPeriod := h.cfg.PingPeriod
+	if pingPeriod <= 0 {
+		pingPeriod = 50 * time.Second
+	}
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case msg := <-c.Send:
+			_ = c.Conn.SetWriteDeadline(time.Now().Add(h.writeTimeout()))
 			if err := c.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 				h.log.Warn("failed to write ws message", "peer_id", c.PeerID, "err", err)
+				return
+			}
+		case <-ticker.C:
+			_ = c.Conn.SetWriteDeadline(time.Now().Add(h.writeTimeout()))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				h.log.Warn("failed to write ws ping", "peer_id", c.PeerID, "err", err)
 				return
 			}
 		case <-c.Done:
@@ -175,6 +198,8 @@ func (h *WSHandler) readPump(ctx context.Context, c *models.Client) {
 			handleErr = h.handleCreateSession(ctx, c)
 		case joinSession:
 			handleErr = h.handleJoinSession(ctx, c, m.Data)
+		case resumeSession:
+			handleErr = h.handleResumeSession(ctx, c, m.Data)
 		case webrtcOffer:
 			handleErr = h.handleWebRTCOffer(ctx, c, m.Data)
 		case webrtcAnswer:
@@ -187,7 +212,7 @@ func (h *WSHandler) readPump(ctx context.Context, c *models.Client) {
 
 		if handleErr != nil {
 			h.log.Warn("failed to handle ws message", "peer_id", c.PeerID, "type", m.Type, "err", handleErr)
-			if sendErr := h.sendErrorResponse(c, handleErr.Error()); sendErr != nil {
+			if sendErr := h.sendErrorResponse(c, clientErrorMessage(handleErr)); sendErr != nil {
 				h.log.Warn("failed to send ws error response", "peer_id", c.PeerID, "err", sendErr)
 				return
 			}
@@ -198,14 +223,16 @@ func (h *WSHandler) readPump(ctx context.Context, c *models.Client) {
 func (h *WSHandler) handleCreateSession(ctx context.Context, c *models.Client) error {
 	const op = "WSHandler.HandleCreateSession"
 
-	sessionID, err := h.service.CreateSession(ctx, c)
+	sessionID, reconnectToken, err := h.service.CreateSession(ctx, c)
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	data := dto.SessionResponse{
-		Status:    dto.Success,
-		SessionID: sessionID,
+		Status:         dto.Success,
+		SessionID:      sessionID,
+		PeerID:         c.PeerID,
+		ReconnectToken: reconnectToken,
 	}
 
 	res, err := json.Marshal(data)
@@ -227,11 +254,35 @@ func (h *WSHandler) handleJoinSession(ctx context.Context, c *models.Client, raw
 		return fmt.Errorf("%s: session_id is required", op)
 	}
 
-	if err := h.service.JoinSession(ctx, sessionData.SessionID, c); err != nil {
+	reconnectToken, err := h.service.JoinSession(ctx, sessionData.SessionID, c)
+	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	if err := h.sendSuccessResponse(c); err != nil {
+	if err := h.sendSessionResponse(c, sessionData.SessionID, reconnectToken); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func (h *WSHandler) handleResumeSession(ctx context.Context, c *models.Client, rawData json.RawMessage) error {
+	const op = "WSHandler.HandleResumeSession"
+
+	var resumeData dto.ResumeData
+	if err := json.Unmarshal(rawData, &resumeData); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if strings.TrimSpace(resumeData.ReconnectToken) == "" {
+		return fmt.Errorf("%s: reconnect_token is required", op)
+	}
+
+	sessionID, reconnectToken, err := h.service.ResumeSession(ctx, resumeData.ReconnectToken, c)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	if err := h.sendSessionResponse(c, sessionID, reconnectToken); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -336,6 +387,24 @@ func (h *WSHandler) sendSuccessResponse(c *models.Client) error {
 	return c.Enqueue(res)
 }
 
+func (h *WSHandler) sendSessionResponse(c *models.Client, sessionID uuid.UUID, reconnectToken string) error {
+	const op = "WSHandler.SendSessionResponse"
+
+	data := dto.SessionResponse{
+		Status:         dto.Success,
+		SessionID:      sessionID,
+		PeerID:         c.PeerID,
+		ReconnectToken: reconnectToken,
+	}
+
+	res, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return c.Enqueue(res)
+}
+
 func (h *WSHandler) sendErrorResponse(c *models.Client, message string) error {
 	const op = "WSHandler.SendErrorResponse"
 
@@ -350,4 +419,40 @@ func (h *WSHandler) sendErrorResponse(c *models.Client, message string) error {
 	}
 
 	return c.Enqueue(res)
+}
+
+func (h *WSHandler) configureConn(conn *websocket.Conn) {
+	if h.cfg.ReadLimit > 0 {
+		conn.SetReadLimit(h.cfg.ReadLimit)
+	}
+
+	pongWait := h.pongWait()
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+}
+
+func (h *WSHandler) pongWait() time.Duration {
+	if h.cfg.PongWait > 0 {
+		return h.cfg.PongWait
+	}
+
+	return 60 * time.Second
+}
+
+func (h *WSHandler) writeTimeout() time.Duration {
+	if h.cfg.WriteTimeout > 0 {
+		return h.cfg.WriteTimeout
+	}
+
+	return 5 * time.Second
+}
+
+func clientErrorMessage(err error) string {
+	if errors.Is(err, grpcsignaling.ErrRoomNotFound) {
+		return "room not found"
+	}
+
+	return err.Error()
 }

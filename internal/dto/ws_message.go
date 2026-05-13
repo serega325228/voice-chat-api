@@ -15,6 +15,10 @@ type SessionData struct {
 	SessionID uuid.UUID `json:"session_id"`
 }
 
+type ResumeData struct {
+	ReconnectToken string `json:"reconnect_token"`
+}
+
 type OfferData struct {
 	SessionID uuid.UUID `json:"session_id"`
 	SDP       string    `json:"sdp"`

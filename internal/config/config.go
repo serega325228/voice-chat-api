@@ -38,12 +38,17 @@ type GRPCKeepalive struct {
 }
 
 type Signaling struct {
-	EnqueueTimeout       time.Duration `yaml:"enqueue_timeout" env-default:"200ms"`
-	ReconnectMinDelay    time.Duration `yaml:"reconnect_min_delay" env-default:"250ms"`
-	ReconnectMaxDelay    time.Duration `yaml:"reconnect_max_delay" env-default:"5s"`
-	LeaveTimeout         time.Duration `yaml:"leave_timeout" env-default:"5s"`
-	ControlWriteTimeout  time.Duration `yaml:"control_write_timeout" env-default:"1s"`
-	WebSocketSendBufSize int           `yaml:"websocket_send_buffer_size" env-default:"128"`
+	EnqueueTimeout        time.Duration `yaml:"enqueue_timeout" env-default:"200ms"`
+	ReconnectMinDelay     time.Duration `yaml:"reconnect_min_delay" env-default:"250ms"`
+	ReconnectMaxDelay     time.Duration `yaml:"reconnect_max_delay" env-default:"5s"`
+	ReconnectTokenTTL     time.Duration `yaml:"reconnect_token_ttl" env-default:"5m"`
+	LeaveTimeout          time.Duration `yaml:"leave_timeout" env-default:"5s"`
+	ControlWriteTimeout   time.Duration `yaml:"control_write_timeout" env-default:"1s"`
+	WebSocketPongWait     time.Duration `yaml:"websocket_pong_wait" env-default:"60s"`
+	WebSocketPingPeriod   time.Duration `yaml:"websocket_ping_period" env-default:"50s"`
+	WebSocketWriteTimeout time.Duration `yaml:"websocket_write_timeout" env-default:"5s"`
+	WebSocketReadLimit    int64         `yaml:"websocket_read_limit" env-default:"1048576"`
+	WebSocketSendBufSize  int           `yaml:"websocket_send_buffer_size" env-default:"128"`
 }
 
 type Postgres struct {

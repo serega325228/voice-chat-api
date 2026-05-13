@@ -15,8 +15,13 @@ signaling:
     enqueue_timeout: "200ms"
     reconnect_min_delay: "250ms"
     reconnect_max_delay: "5s"
+    reconnect_token_ttl: "5m"
     leave_timeout: "5s"
     control_write_timeout: "1s"
+    websocket_pong_wait: "60s"
+    websocket_ping_period: "50s"
+    websocket_write_timeout: "5s"
+    websocket_read_limit: 1048576
     websocket_send_buffer_size: 128
 jwt:
     access_ttl: "15m"
