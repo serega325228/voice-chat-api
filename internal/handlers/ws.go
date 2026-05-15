@@ -122,9 +122,9 @@ func (h *WSHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		Done:           make(chan struct{}),
 		EnqueueTimeout: h.cfg.EnqueueTimeout,
 	}
-	defer close(client.Done)
-
 	defer func() {
+		close(client.Done)
+
 		leaveCtx, leaveCancel := context.WithTimeout(context.Background(), h.cfg.LeaveTimeout)
 		defer leaveCancel()
 		if err := h.service.LeaveSession(leaveCtx, client); err != nil {

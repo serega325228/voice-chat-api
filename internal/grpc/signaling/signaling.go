@@ -382,6 +382,11 @@ func (s *Service) scheduleReconnect(client *models.Client) {
 	if client.SessionID == uuid.Nil {
 		return
 	}
+	select {
+	case <-client.Done:
+		return
+	default:
+	}
 	if !client.StartReconnect() {
 		return
 	}
